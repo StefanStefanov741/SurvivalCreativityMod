@@ -23,6 +23,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
 import ortero.survivalcreativity.com.SurvivalCreativityMod;
+import ortero.survivalcreativity.com.client.gui.ExitImaginationScreen;
 import ortero.survivalcreativity.com.client.gui.ImaginationListScreen;
 import ortero.survivalcreativity.com.client.gui.SaveImaginationScreen;
 
@@ -99,10 +100,28 @@ public final class ImaginationManager {
 			return;
 		}
 		if (mode == ImaginationMode.EDITING) {
-			exitEdit(client, false);
+			requestExitEdit(client);
 		} else {
 			enterEdit(client);
 		}
+	}
+
+	/**
+	 * Leave edit mode. If there are unsaved changes, ask Save / Discard / Keep editing.
+	 */
+	public void requestExitEdit(Minecraft client) {
+		if (!isEditing() || client.player == null) {
+			return;
+		}
+		Imagination diff = buildDiff(client);
+		if (diff == null || diff.isEmpty()) {
+			exitEdit(client, false);
+			return;
+		}
+		client.gui.setScreen(new ExitImaginationScreen(
+			() -> requestSave(client),
+			() -> exitEdit(client, false)
+		));
 	}
 
 	public void enterEdit(Minecraft client) {
@@ -121,7 +140,10 @@ public final class ImaginationManager {
 			return;
 		}
 		if (mode == ImaginationMode.EDITING) {
-			exitEdit(client, false);
+			// Switching imaginations — discard current session after confirm would be complex;
+			// require a clean exit first.
+			client.player.sendOverlayMessage(Component.translatable("message.survivalcreativitymod.exit_edit_first"));
+			return;
 		}
 		if (mode == ImaginationMode.PREVIEWING) {
 			clearPreview(client, false);
@@ -254,7 +276,8 @@ public final class ImaginationManager {
 			return;
 		}
 		if (mode == ImaginationMode.EDITING) {
-			exitEdit(client, false);
+			client.player.sendOverlayMessage(Component.translatable("message.survivalcreativitymod.exit_edit_first"));
+			return;
 		}
 		preview = imagination;
 		suppressedPreview.clear();
