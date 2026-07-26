@@ -14,12 +14,14 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -56,6 +58,54 @@ public final class WorldSnapshot {
 			origin.getX() - radius, origin.getY() - radius, origin.getZ() - radius,
 			origin.getX() + radius + 1, origin.getY() + radius + 1, origin.getZ() + radius + 1
 		);
+	}
+
+	public boolean contains(BlockPos pos) {
+		return Math.abs(pos.getX() - origin.getX()) <= radius
+			&& Math.abs(pos.getY() - origin.getY()) <= radius
+			&& Math.abs(pos.getZ() - origin.getZ()) <= radius;
+	}
+
+	public @Nullable BlockState getBlock(BlockPos pos) {
+		return blocks.get(pos.asLong());
+	}
+
+	public @Nullable CompoundTag getBlockEntity(BlockPos pos) {
+		return blockEntities.get(pos.asLong());
+	}
+
+	/** Paste this snapshot into a client level (used when reapplying blocks locally). */
+	public void pasteInto(net.minecraft.client.multiplayer.ClientLevel level) {
+		HolderLookup.Provider registries = level.registryAccess();
+		for (Map.Entry<Long, BlockState> entry : blocks.entrySet()) {
+			BlockState state = entry.getValue();
+			if (state.isAir()) {
+				continue;
+			}
+			BlockPos pos = BlockPos.of(entry.getKey());
+			level.setBlock(pos, state, 3);
+			CompoundTag beTag = blockEntities.get(entry.getKey());
+			if (beTag != null) {
+				BlockEntity be = level.getBlockEntity(pos);
+				if (be != null) {
+					try {
+						var input = TagValueInput.create(ProblemReporter.DISCARDING, registries, beTag);
+						be.loadWithComponents(input);
+						be.setChanged();
+					} catch (Exception e) {
+						SurvivalCreativityMod.LOGGER.warn("Failed to paste block entity at {}", pos, e);
+					}
+				}
+			}
+		}
+		for (Map.Entry<UUID, CompoundTag> entry : entities.entrySet()) {
+			Entity entity = EntityNbt.load(level, entry.getValue());
+			if (entity == null) {
+				continue;
+			}
+			entity.setUUID(entry.getKey());
+			ClientEntitySpawner.add(level, entity);
+		}
 	}
 
 	public static WorldSnapshot capture(Level level, Vec3 center, int radius, @Nullable UUID excludePlayer) {
@@ -98,6 +148,7 @@ public final class WorldSnapshot {
 	public void restore(Minecraft client) {
 		MinecraftServer server = client.getSingleplayerServer();
 		if (server == null || client.player == null) {
+			// Multiplayer should use restoreRemoteClient — full local restore desyncs entities.
 			restoreLocal(client.level);
 			return;
 		}
@@ -110,6 +161,51 @@ public final class WorldSnapshot {
 			ServerLevel level = serverPlayer.level();
 			restoreOnLevel(level, playerId);
 		});
+	}
+
+	/**
+	 * Multiplayer exit: revert only locally edited blocks and drop client-only entities.
+	 * Never wipe server-synced entities (leashes, mobs, etc.).
+	 */
+	public void restoreRemoteClient(
+		net.minecraft.client.multiplayer.ClientLevel level,
+		java.util.Set<BlockPos> dirtyBlocks
+	) {
+		if (level == null) {
+			return;
+		}
+		HolderLookup.Provider registries = level.registryAccess();
+		for (BlockPos pos : dirtyBlocks) {
+			BlockState original = blocks.get(pos.asLong());
+			if (original == null) {
+				continue;
+			}
+			level.setBlock(pos, original, 3);
+			CompoundTag beTag = blockEntities.get(pos.asLong());
+			if (beTag != null) {
+				BlockEntity be = level.getBlockEntity(pos);
+				if (be != null) {
+					try {
+						var input = net.minecraft.world.level.storage.TagValueInput.create(
+							net.minecraft.util.ProblemReporter.DISCARDING, registries, beTag);
+						be.loadWithComponents(input);
+						be.setChanged();
+					} catch (Exception e) {
+						SurvivalCreativityMod.LOGGER.warn("Failed to restore block entity at {}", pos, e);
+					}
+				}
+			}
+		}
+
+		for (Entity entity : level.getEntities(null, bounds())) {
+			if (entity instanceof Player) {
+				continue;
+			}
+			// ClientEntitySpawner / hologram ghosts use negative network IDs
+			if (entity.getId() < 0) {
+				entity.discard();
+			}
+		}
 	}
 
 	private void restoreLocal(Level level) {

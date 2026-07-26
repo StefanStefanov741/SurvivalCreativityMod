@@ -5,7 +5,9 @@
 	"client": [
 		"ClientPacketListenerMixin",
 		"ConnectionMixin",
-		"EntityMixin"
+		"EntityMixin",
+		"LevelMixin",
+		"MultiPlayerGameModeMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

@@ -3,8 +3,10 @@ package ortero.survivalcreativity.com.client.imagination;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -31,8 +33,8 @@ import ortero.survivalcreativity.com.client.gui.SaveImaginationScreen;
  * Imagination sessions:
  * <ul>
  *   <li><b>Singleplayer</b> — real Creative on the integrated server; snapshot restores the world.</li>
- *   <li><b>Multiplayer</b> — client-local Creative only; mutation packets are blocked and the
- *       local snapshot is restored on exit (server world is untouched).</li>
+ *   <li><b>Multiplayer</b> — stay in the live world (AFK heartbeat on the server), build only
+ *       locally, and revert those local edits on exit so the real world stays in sync.</li>
  * </ul>
  */
 public final class ImaginationManager {
@@ -48,6 +50,10 @@ public final class ImaginationManager {
 	private WorldSnapshot sessionSnapshot;
 	/** True when editing on a remote server (no integrated server authority). */
 	private boolean remoteSession;
+	/** Local block edits during remote sessions — reapplied when the server syncs chunks. */
+	private final Map<BlockPos, BlockState> remoteOverlay = new HashMap<>();
+	private boolean suppressingRemoteDirty;
+	private boolean sendingIdleHeartbeat;
 	private GameType previousGameType = GameType.SURVIVAL;
 	private ItemStack[] inventorySnapshot = new ItemStack[0];
 	private int selectedSlotSnapshot;
@@ -74,9 +80,13 @@ public final class ImaginationManager {
 		return mode == ImaginationMode.EDITING;
 	}
 
-	/** Multiplayer client-local edit (packets gated; snapshot restored only on this client). */
+	/** Multiplayer local-build session (live world keeps syncing; edits are an overlay). */
 	public boolean isRemoteEditing() {
 		return isEditing() && remoteSession;
+	}
+
+	public boolean isSendingIdleHeartbeat() {
+		return sendingIdleHeartbeat;
 	}
 
 	public boolean isPreviewing() {
@@ -150,6 +160,8 @@ public final class ImaginationManager {
 		}
 
 		remoteSession = client.getSingleplayerServer() == null;
+		remoteOverlay.clear();
+		suppressingRemoteDirty = false;
 		working = session;
 		previousGameType = client.gameMode.getPlayerMode();
 		snapshotInventory(client.player);
@@ -238,16 +250,33 @@ public final class ImaginationManager {
 		}
 
 		client.gui.setScreen(null);
-		if (sessionSnapshot != null) {
+
+		if (remoteSession && sessionSnapshot != null && client.level instanceof ClientLevel clientLevel) {
+			suppressingRemoteDirty = true;
+			try {
+				sessionSnapshot.restoreRemoteClient(clientLevel, Set.copyOf(remoteOverlay.keySet()));
+			} finally {
+				suppressingRemoteDirty = false;
+				remoteOverlay.clear();
+			}
+			// Match the AFK body the server still has, so we don't desync / clip on exit
+			if (client.player != null && bodyPosition != null) {
+				client.player.snapTo(bodyPosition.x, bodyPosition.y, bodyPosition.z, bodyYRot, bodyXRot);
+				client.player.setDeltaMovement(Vec3.ZERO);
+			}
+		} else if (sessionSnapshot != null) {
 			sessionSnapshot.restore(client);
+			restoreBody(client);
 		}
+
 		restoreInventory(client.player);
-		restoreBody(client);
+		bodyPosition = null;
 		setCreativeMode(client, false);
 
 		working = null;
 		sessionSnapshot = null;
 		remoteSession = false;
+		remoteOverlay.clear();
 		mode = ImaginationMode.IDLE;
 
 		if (client.player != null) {
@@ -256,6 +285,60 @@ public final class ImaginationManager {
 			} else {
 				client.player.sendOverlayMessage(Component.translatable("message.survivalcreativitymod.edit_exit"));
 			}
+		}
+	}
+
+	public void onRemoteClientBlockChanged(BlockPos pos, BlockState state) {
+		if (!remoteSession || !isEditing() || suppressingRemoteDirty || sessionSnapshot == null) {
+			return;
+		}
+		if (!sessionSnapshot.contains(pos)) {
+			return;
+		}
+		BlockState original = sessionSnapshot.getBlock(pos);
+		BlockPos key = pos.immutable();
+		if (original != null && original.equals(state)) {
+			remoteOverlay.remove(key);
+		} else {
+			remoteOverlay.put(key, state);
+		}
+	}
+
+	public void reapplyRemoteOverlay(BlockPos pos) {
+		if (!isRemoteEditing() || remoteOverlay.isEmpty()) {
+			return;
+		}
+		BlockState overlay = remoteOverlay.get(pos);
+		if (overlay == null) {
+			return;
+		}
+		Minecraft client = Minecraft.getInstance();
+		if (!(client.level instanceof ClientLevel level)) {
+			return;
+		}
+		suppressingRemoteDirty = true;
+		try {
+			level.setBlock(pos, overlay, 3);
+		} finally {
+			suppressingRemoteDirty = false;
+		}
+	}
+
+	public void reapplyRemoteOverlayAll() {
+		if (!isRemoteEditing() || remoteOverlay.isEmpty()) {
+			return;
+		}
+		Minecraft client = Minecraft.getInstance();
+		if (!(client.level instanceof ClientLevel level)) {
+			return;
+		}
+		suppressingRemoteDirty = true;
+		try {
+			for (Map.Entry<BlockPos, BlockState> entry : remoteOverlay.entrySet()) {
+				level.setBlock(entry.getKey(), entry.getValue(), 3);
+			}
+		} finally {
+			suppressingRemoteDirty = false;
 		}
 	}
 
@@ -351,12 +434,33 @@ public final class ImaginationManager {
 		if (!isEditing() || client.gameMode == null || client.player == null) {
 			return;
 		}
-		// Keep creative if something resets it; do not force flying (gravity must work)
 		if (client.gameMode.getPlayerMode() != GameType.CREATIVE) {
 			client.gameMode.setLocalMode(GameType.CREATIVE);
 		}
 		if (remoteSession) {
 			applyLocalCreativeAbilities(client.player, true);
+			keepServerBodyIdle(client);
+		}
+	}
+
+	/** Stay AFK on the server at the enter position while moving freely locally. */
+	private void keepServerBodyIdle(Minecraft client) {
+		if (bodyPosition == null || client.getConnection() == null) {
+			return;
+		}
+		sendingIdleHeartbeat = true;
+		try {
+			client.getConnection().send(new net.minecraft.network.protocol.game.ServerboundMovePlayerPacket.PosRot(
+				bodyPosition.x,
+				bodyPosition.y,
+				bodyPosition.z,
+				bodyYRot,
+				bodyXRot,
+				true,
+				false
+			));
+		} finally {
+			sendingIdleHeartbeat = false;
 		}
 	}
 
@@ -366,6 +470,9 @@ public final class ImaginationManager {
 		ghostEntities = List.of();
 		sessionSnapshot = null;
 		remoteSession = false;
+		remoteOverlay.clear();
+		suppressingRemoteDirty = false;
+		sendingIdleHeartbeat = false;
 		suppressedPreview.clear();
 		inventorySnapshot = new ItemStack[0];
 		bodyPosition = null;

@@ -1,21 +1,17 @@
 package ortero.survivalcreativity.com.client.imagination;
 
 import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.game.ClientboundBlockChangedAckPacket;
-import net.minecraft.network.protocol.game.ClientboundBlockDestructionPacket;
-import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
-import net.minecraft.network.protocol.game.ClientboundBlockEventPacket;
-import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.network.protocol.game.ClientboundGameEventPacket;
-import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerAbilitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
-import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket;
 import net.minecraft.network.protocol.game.ServerboundContainerClickPacket;
 import net.minecraft.network.protocol.game.ServerboundInteractPacket;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import net.minecraft.network.protocol.game.ServerboundPickItemFromBlockPacket;
+import net.minecraft.network.protocol.game.ServerboundPickItemFromEntityPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerAbilitiesPacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundSetCreativeModeSlotPacket;
@@ -24,8 +20,9 @@ import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 
 /**
- * On multiplayer, imagination is client-local: block packets that would change the
- * real server world, and ignore server overwrites of our local sandbox.
+ * Multiplayer imagination stays in the live world: block outbound place/break/move
+ * (except AFK heartbeats) and ignore inbound packets that would yank creative mode,
+ * inventory, or position. Chunk/block sync still applies so the world keeps rendering.
  */
 public final class ImaginationPacketGate {
 	private ImaginationPacketGate() {
@@ -36,6 +33,10 @@ public final class ImaginationPacketGate {
 		if (!manager.isRemoteEditing()) {
 			return false;
 		}
+		if (packet instanceof ServerboundMovePlayerPacket) {
+			// Allow only the AFK heartbeat we inject each tick
+			return !manager.isSendingIdleHeartbeat();
+		}
 		return packet instanceof ServerboundPlayerActionPacket
 			|| packet instanceof ServerboundUseItemOnPacket
 			|| packet instanceof ServerboundUseItemPacket
@@ -43,7 +44,9 @@ public final class ImaginationPacketGate {
 			|| packet instanceof ServerboundSetCreativeModeSlotPacket
 			|| packet instanceof ServerboundPlayerAbilitiesPacket
 			|| packet instanceof ServerboundContainerClickPacket
-			|| packet instanceof ServerboundSignUpdatePacket;
+			|| packet instanceof ServerboundSignUpdatePacket
+			|| packet instanceof ServerboundPickItemFromBlockPacket
+			|| packet instanceof ServerboundPickItemFromEntityPacket;
 	}
 
 	public static boolean shouldBlockInbound(Packet<?> packet) {
@@ -51,14 +54,8 @@ public final class ImaginationPacketGate {
 		if (!manager.isRemoteEditing()) {
 			return false;
 		}
-		if (packet instanceof ClientboundBlockUpdatePacket
-			|| packet instanceof ClientboundSectionBlocksUpdatePacket
-			|| packet instanceof ClientboundBlockEntityDataPacket
-			|| packet instanceof ClientboundBlockEventPacket
-			|| packet instanceof ClientboundBlockDestructionPacket
-			|| packet instanceof ClientboundBlockChangedAckPacket
-			|| packet instanceof ClientboundLevelChunkWithLightPacket
-			|| packet instanceof ClientboundPlayerPositionPacket
+		// Only yank-prevention; chunks/blocks/entities keep syncing normally.
+		if (packet instanceof ClientboundPlayerPositionPacket
 			|| packet instanceof ClientboundPlayerAbilitiesPacket
 			|| packet instanceof ClientboundSetPlayerInventoryPacket
 			|| packet instanceof ClientboundContainerSetSlotPacket

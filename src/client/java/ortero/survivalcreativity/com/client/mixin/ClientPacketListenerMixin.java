@@ -7,10 +7,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.game.ClientboundBlockChangedAckPacket;
-import net.minecraft.network.protocol.game.ClientboundBlockDestructionPacket;
-import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
-import net.minecraft.network.protocol.game.ClientboundBlockEventPacket;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
@@ -21,45 +17,11 @@ import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket;
 
+import ortero.survivalcreativity.com.client.imagination.ImaginationManager;
 import ortero.survivalcreativity.com.client.imagination.ImaginationPacketGate;
 
 @Mixin(ClientPacketListener.class)
 public abstract class ClientPacketListenerMixin {
-	@Inject(method = "handleBlockUpdate", at = @At("HEAD"), cancellable = true)
-	private void survivalcreativity$blockUpdate(ClientboundBlockUpdatePacket packet, CallbackInfo ci) {
-		cancelIfNeeded(packet, ci);
-	}
-
-	@Inject(method = "handleChunkBlocksUpdate", at = @At("HEAD"), cancellable = true)
-	private void survivalcreativity$sectionUpdate(ClientboundSectionBlocksUpdatePacket packet, CallbackInfo ci) {
-		cancelIfNeeded(packet, ci);
-	}
-
-	@Inject(method = "handleBlockEntityData", at = @At("HEAD"), cancellable = true)
-	private void survivalcreativity$blockEntity(ClientboundBlockEntityDataPacket packet, CallbackInfo ci) {
-		cancelIfNeeded(packet, ci);
-	}
-
-	@Inject(method = "handleBlockEvent", at = @At("HEAD"), cancellable = true)
-	private void survivalcreativity$blockEvent(ClientboundBlockEventPacket packet, CallbackInfo ci) {
-		cancelIfNeeded(packet, ci);
-	}
-
-	@Inject(method = "handleBlockDestruction", at = @At("HEAD"), cancellable = true)
-	private void survivalcreativity$blockDestruction(ClientboundBlockDestructionPacket packet, CallbackInfo ci) {
-		cancelIfNeeded(packet, ci);
-	}
-
-	@Inject(method = "handleBlockChangedAck", at = @At("HEAD"), cancellable = true)
-	private void survivalcreativity$blockAck(ClientboundBlockChangedAckPacket packet, CallbackInfo ci) {
-		cancelIfNeeded(packet, ci);
-	}
-
-	@Inject(method = "handleLevelChunkWithLight", at = @At("HEAD"), cancellable = true)
-	private void survivalcreativity$chunk(ClientboundLevelChunkWithLightPacket packet, CallbackInfo ci) {
-		cancelIfNeeded(packet, ci);
-	}
-
 	@Inject(method = "handleMovePlayer", at = @At("HEAD"), cancellable = true)
 	private void survivalcreativity$movePlayer(ClientboundPlayerPositionPacket packet, CallbackInfo ci) {
 		cancelIfNeeded(packet, ci);
@@ -88,6 +50,21 @@ public abstract class ClientPacketListenerMixin {
 	@Inject(method = "handleGameEvent", at = @At("HEAD"), cancellable = true)
 	private void survivalcreativity$gameEvent(ClientboundGameEventPacket packet, CallbackInfo ci) {
 		cancelIfNeeded(packet, ci);
+	}
+
+	@Inject(method = "handleBlockUpdate", at = @At("RETURN"))
+	private void survivalcreativity$reapplyAfterBlockUpdate(ClientboundBlockUpdatePacket packet, CallbackInfo ci) {
+		ImaginationManager.INSTANCE.reapplyRemoteOverlay(packet.getPos());
+	}
+
+	@Inject(method = "handleChunkBlocksUpdate", at = @At("RETURN"))
+	private void survivalcreativity$reapplyAfterSection(ClientboundSectionBlocksUpdatePacket packet, CallbackInfo ci) {
+		ImaginationManager.INSTANCE.reapplyRemoteOverlayAll();
+	}
+
+	@Inject(method = "handleLevelChunkWithLight", at = @At("RETURN"))
+	private void survivalcreativity$reapplyAfterChunk(ClientboundLevelChunkWithLightPacket packet, CallbackInfo ci) {
+		ImaginationManager.INSTANCE.reapplyRemoteOverlayAll();
 	}
 
 	private static void cancelIfNeeded(Packet<?> packet, CallbackInfo ci) {
