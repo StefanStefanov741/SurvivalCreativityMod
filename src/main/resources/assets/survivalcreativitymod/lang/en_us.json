@@ -18,7 +18,9 @@
 	"screen.survivalcreativitymod.blocks": "%s blocks",
 
 	"message.survivalcreativitymod.edit_enter": "Real creative imagination (±4 chunks). Build freely — water, redstone, entities work. K saves a hologram of the diff, I exits and restores the world.",
+	"message.survivalcreativitymod.edit_enter_remote": "Local imagination (±4 chunks). Builds stay on your client only — the server is untouched. K saves a hologram, I exits and restores your view.",
 	"message.survivalcreativitymod.edit_existing": "Editing \"%s\" in real creative. K saves over it, I exits and restores the world.",
+	"message.survivalcreativitymod.edit_existing_remote": "Editing \"%s\" locally on this client. K saves over it, I exits and restores your view.",
 	"message.survivalcreativitymod.edit_exit": "Imagination ended — world restored to how it was.",
 	"message.survivalcreativitymod.saved": "Saved: %s",
 	"message.survivalcreativitymod.load_hint": "Press H, then click an imagination to show its hologram.",
@@ -26,6 +28,5 @@
 	"message.survivalcreativitymod.empty": "Nothing to save — change some blocks or entities first.",
 	"message.survivalcreativitymod.exit_edit_first": "Exit imagination edit (I) before loading a hologram.",
 	"message.survivalcreativitymod.preview_start": "Hologram: %s — fill it in survival. Press U to hide.",
-	"message.survivalcreativitymod.preview_hide": "Imagination hologram hidden.",
-	"message.survivalcreativitymod.singleplayer_only": "Imagination edit currently requires singleplayer (needs a world snapshot)."
+	"message.survivalcreativitymod.preview_hide": "Imagination hologram hidden."
 }

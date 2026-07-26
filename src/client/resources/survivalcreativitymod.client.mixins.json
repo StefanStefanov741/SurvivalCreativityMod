@@ -3,6 +3,8 @@
 	"package": "ortero.survivalcreativity.com.client.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
+		"ClientPacketListenerMixin",
+		"ConnectionMixin",
 		"EntityMixin"
 	],
 	"injectors": {

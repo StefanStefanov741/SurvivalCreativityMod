@@ -27,8 +27,12 @@ import ortero.survivalcreativity.com.client.gui.ImaginationListScreen;
 import ortero.survivalcreativity.com.client.gui.SaveImaginationScreen;
 
 /**
- * Imagination sessions now run as real Creative mode on a snapshotted region.
- * On exit the region is restored; on save the diff becomes the hologram.
+ * Imagination sessions:
+ * <ul>
+ *   <li><b>Singleplayer</b> — real Creative on the integrated server; snapshot restores the world.</li>
+ *   <li><b>Multiplayer</b> — client-local Creative only; mutation packets are blocked and the
+ *       local snapshot is restored on exit (server world is untouched).</li>
+ * </ul>
  */
 public final class ImaginationManager {
 	public static final ImaginationManager INSTANCE = new ImaginationManager();
@@ -41,6 +45,8 @@ public final class ImaginationManager {
 	private final Set<BlockPos> suppressedPreview = new HashSet<>();
 	private List<GhostEntity> ghostEntities = List.of();
 	private WorldSnapshot sessionSnapshot;
+	/** True when editing on a remote server (no integrated server authority). */
+	private boolean remoteSession;
 	private GameType previousGameType = GameType.SURVIVAL;
 	private ItemStack[] inventorySnapshot = new ItemStack[0];
 	private int selectedSlotSnapshot;
@@ -65,6 +71,11 @@ public final class ImaginationManager {
 
 	public boolean isEditing() {
 		return mode == ImaginationMode.EDITING;
+	}
+
+	/** Multiplayer client-local edit (packets gated; snapshot restored only on this client). */
+	public boolean isRemoteEditing() {
+		return isEditing() && remoteSession;
 	}
 
 	public boolean isPreviewing() {
@@ -109,10 +120,6 @@ public final class ImaginationManager {
 		if (client.player == null || client.gameMode == null || !(client.level instanceof ClientLevel level)) {
 			return;
 		}
-		if (client.getSingleplayerServer() == null) {
-			client.player.sendOverlayMessage(Component.translatable("message.survivalcreativitymod.singleplayer_only"));
-			return;
-		}
 		if (mode == ImaginationMode.EDITING) {
 			exitEdit(client, false);
 		}
@@ -120,6 +127,7 @@ public final class ImaginationManager {
 			clearPreview(client, false);
 		}
 
+		remoteSession = client.getSingleplayerServer() == null;
 		working = session;
 		previousGameType = client.gameMode.getPlayerMode();
 		snapshotInventory(client.player);
@@ -135,15 +143,22 @@ public final class ImaginationManager {
 		setCreativeMode(client, true);
 
 		if (existing && !session.isEmpty()) {
-			applyImaginationToServer(client, session);
+			applyImaginationToWorld(client, session);
 		}
 
 		mode = ImaginationMode.EDITING;
 		if (existing) {
 			client.player.sendOverlayMessage(
-				Component.translatable("message.survivalcreativitymod.edit_existing", session.name()));
+				Component.translatable(
+					remoteSession
+						? "message.survivalcreativitymod.edit_existing_remote"
+						: "message.survivalcreativitymod.edit_existing",
+					session.name()));
 		} else {
-			client.player.sendOverlayMessage(Component.translatable("message.survivalcreativitymod.edit_enter"));
+			client.player.sendOverlayMessage(Component.translatable(
+				remoteSession
+					? "message.survivalcreativitymod.edit_enter_remote"
+					: "message.survivalcreativitymod.edit_enter"));
 		}
 	}
 
@@ -210,6 +225,7 @@ public final class ImaginationManager {
 
 		working = null;
 		sessionSnapshot = null;
+		remoteSession = false;
 		mode = ImaginationMode.IDLE;
 
 		if (client.player != null) {
@@ -316,6 +332,9 @@ public final class ImaginationManager {
 		if (client.gameMode.getPlayerMode() != GameType.CREATIVE) {
 			client.gameMode.setLocalMode(GameType.CREATIVE);
 		}
+		if (remoteSession) {
+			applyLocalCreativeAbilities(client.player, true);
+		}
 	}
 
 	public void onDisconnect() {
@@ -323,6 +342,7 @@ public final class ImaginationManager {
 		preview = null;
 		ghostEntities = List.of();
 		sessionSnapshot = null;
+		remoteSession = false;
 		suppressedPreview.clear();
 		inventorySnapshot = new ItemStack[0];
 		bodyPosition = null;
@@ -334,37 +354,62 @@ public final class ImaginationManager {
 		if (client.gameMode != null) {
 			client.gameMode.setLocalMode(target);
 		}
-		MinecraftServer server = client.getSingleplayerServer();
-		if (server != null && client.player != null) {
-			UUID uuid = client.player.getUUID();
-			server.execute(() -> {
-				var serverPlayer = server.getPlayerList().getPlayer(uuid);
-				if (serverPlayer != null) {
-					serverPlayer.setGameMode(target);
-				}
-			});
+		if (!remoteSession) {
+			MinecraftServer server = client.getSingleplayerServer();
+			if (server != null && client.player != null) {
+				UUID uuid = client.player.getUUID();
+				server.execute(() -> {
+					var serverPlayer = server.getPlayerList().getPlayer(uuid);
+					if (serverPlayer != null) {
+						serverPlayer.setGameMode(target);
+					}
+				});
+			}
 		}
-		if (!creative && client.player != null) {
-			var abilities = client.player.getAbilities();
-			previousGameType.updatePlayerAbilities(abilities);
-			abilities.flying = false;
-			client.player.onUpdateAbilities();
+		if (client.player != null) {
+			if (creative) {
+				applyLocalCreativeAbilities(client.player, true);
+			} else {
+				var abilities = client.player.getAbilities();
+				previousGameType.updatePlayerAbilities(abilities);
+				abilities.flying = false;
+				// Avoid syncing fake abilities to a remote server
+				if (!remoteSession) {
+					client.player.onUpdateAbilities();
+				}
+			}
 		}
 	}
 
-	private void applyImaginationToServer(Minecraft client, Imagination imagination) {
-		MinecraftServer server = client.getSingleplayerServer();
-		if (server == null || client.player == null) {
-			return;
+	private static void applyLocalCreativeAbilities(LocalPlayer player, boolean creative) {
+		var abilities = player.getAbilities();
+		if (creative) {
+			abilities.mayfly = true;
+			abilities.instabuild = true;
+			abilities.invulnerable = true;
+			abilities.mayBuild = true;
 		}
-		UUID uuid = client.player.getUUID();
-		server.execute(() -> {
-			var serverPlayer = server.getPlayerList().getPlayer(uuid);
-			if (serverPlayer == null) {
+	}
+
+	private void applyImaginationToWorld(Minecraft client, Imagination imagination) {
+		if (!remoteSession) {
+			MinecraftServer server = client.getSingleplayerServer();
+			if (server == null || client.player == null) {
 				return;
 			}
-			WorldSnapshot.applyImagination(serverPlayer.level(), imagination);
-		});
+			UUID uuid = client.player.getUUID();
+			server.execute(() -> {
+				var serverPlayer = server.getPlayerList().getPlayer(uuid);
+				if (serverPlayer == null) {
+					return;
+				}
+				WorldSnapshot.applyImagination(serverPlayer.level(), imagination);
+			});
+			return;
+		}
+		if (client.level != null) {
+			WorldSnapshot.applyImagination(client.level, imagination);
+		}
 	}
 
 	private void snapshotBody(LocalPlayer player) {
