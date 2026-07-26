@@ -1,0 +1,31 @@
+{
+	"key.category.survivalcreativitymod.controls": "Survival Creativity",
+	"key.survivalcreativitymod.toggle_edit": "Toggle Imagination Edit",
+	"key.survivalcreativitymod.save": "Save Imagination",
+	"key.survivalcreativitymod.open_menu": "Open Imaginations (Load Hologram)",
+	"key.survivalcreativitymod.hide_preview": "Hide Imagination Preview",
+
+	"screen.survivalcreativitymod.save": "Save Imagination",
+	"screen.survivalcreativitymod.name": "Name",
+	"screen.survivalcreativitymod.confirm": "Save",
+	"screen.survivalcreativitymod.list": "Saved Imaginations",
+	"screen.survivalcreativitymod.list_hint": "Click a name to load hologram — Edit reopens the creative sandbox",
+	"screen.survivalcreativitymod.load": "Load",
+	"screen.survivalcreativitymod.edit": "Edit",
+	"screen.survivalcreativitymod.delete": "Delete",
+	"screen.survivalcreativitymod.empty_list": "No saved imaginations yet — press I, build, then K to save",
+	"screen.survivalcreativitymod.selected": "Selected: %s",
+	"screen.survivalcreativitymod.blocks": "%s blocks",
+
+	"message.survivalcreativitymod.edit_enter": "Real creative imagination (±4 chunks). Build freely — water, redstone, entities work. K saves a hologram of the diff, I exits and restores the world.",
+	"message.survivalcreativitymod.edit_existing": "Editing \"%s\" in real creative. K saves over it, I exits and restores the world.",
+	"message.survivalcreativitymod.edit_exit": "Imagination ended — world restored to how it was.",
+	"message.survivalcreativitymod.saved": "Saved: %s",
+	"message.survivalcreativitymod.load_hint": "Press H, then click an imagination to show its hologram.",
+	"message.survivalcreativitymod.save_failed": "Failed to save imagination.",
+	"message.survivalcreativitymod.empty": "Nothing to save — change some blocks or entities first.",
+	"message.survivalcreativitymod.exit_edit_first": "Exit imagination edit (I) before loading a hologram.",
+	"message.survivalcreativitymod.preview_start": "Hologram: %s — fill it in survival. Press U to hide.",
+	"message.survivalcreativitymod.preview_hide": "Imagination hologram hidden.",
+	"message.survivalcreativitymod.singleplayer_only": "Imagination edit currently requires singleplayer (needs a world snapshot)."
+}
