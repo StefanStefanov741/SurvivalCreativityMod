@@ -32,4 +32,4 @@ Then run **Minecraft Client** from the debugger.
 
 ## License
 
-This template is available under the CC0 license.
+MIT License — © 2026 Ortero. Free to use and modify; keep the copyright notice if you redistribute.

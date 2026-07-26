@@ -5,13 +5,13 @@
 	"name": "SurvivalCreativityMod",
 	"description": "Plan builds in creative-like imagination mode, then bring them into survival with ghost overlays.",
 	"authors": [
-		"Me!"
+		"Ortero"
 	],
 	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
+		"homepage": "https://github.com/StefanStefanov741/SurvivalCreativityMod",
+		"sources": "https://github.com/StefanStefanov741/SurvivalCreativityMod"
 	},
-	"license": "CC0-1.0",
+	"license": "MIT",
 	"icon": "assets/survivalcreativitymod/icon.png",
 	"environment": "*",
 	"entrypoints": {
