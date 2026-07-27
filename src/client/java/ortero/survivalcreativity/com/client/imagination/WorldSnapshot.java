@@ -2,6 +2,7 @@ package ortero.survivalcreativity.com.client.imagination;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -143,24 +144,170 @@ public final class WorldSnapshot {
 	}
 
 	/**
-	 * Restore this snapshot on the integrated server (authoritative), then client follows via packets.
+	 * Restore a specific set of positions to this snapshot (disconnect / exit).
+	 * Must run on the server thread for singleplayer.
+	 */
+	public void restorePositions(Level level, java.util.Set<BlockPos> positions) {
+		if (positions == null || positions.isEmpty()) {
+			return;
+		}
+		HolderLookup.Provider registries = level.registryAccess();
+		for (BlockPos pos : positions) {
+			BlockState original = blocks.get(pos.asLong());
+			if (original == null) {
+				continue;
+			}
+			level.setBlock(pos, original, 3);
+			CompoundTag beTag = blockEntities.get(pos.asLong());
+			if (beTag != null) {
+				BlockEntity be = level.getBlockEntity(pos);
+				if (be != null) {
+					try {
+						var input = TagValueInput.create(ProblemReporter.DISCARDING, registries, beTag);
+						be.loadWithComponents(input);
+						be.setChanged();
+					} catch (Exception e) {
+						SurvivalCreativityMod.LOGGER.warn("Failed to restore block entity at {}", pos, e);
+					}
+				}
+			}
+		}
+	}
+
+	/**
+	 * Build a revert/hologram diff from tracked dirty positions + a live level (client is fine).
+	 * Does not require the integrated server thread.
+	 */
+	public Imagination createDiffFromPositions(
+		Level level,
+		java.util.Set<BlockPos> positions,
+		String name,
+		UUID id,
+		long createdAt
+	) {
+		Map<BlockPos, BlockChange> changes = new LinkedHashMap<>();
+		if (positions == null || positions.isEmpty() || level == null) {
+			return new Imagination(id, name, createdAt, changes, Map.of());
+		}
+		HolderLookup.Provider registries = level.registryAccess();
+		for (BlockPos pos : positions) {
+			BlockState original = blocks.get(pos.asLong());
+			if (original == null) {
+				continue;
+			}
+			CompoundTag originalBe = blockEntities.get(pos.asLong());
+			BlockState now = level.getBlockState(pos);
+			CompoundTag nowBe = BlockChange.saveBlockEntity(level.getBlockEntity(pos), registries);
+			if (original.equals(now) && Objects.equals(originalBe, nowBe)) {
+				continue;
+			}
+			if (now.isAir()) {
+				if (!original.isAir() || originalBe != null) {
+					changes.put(pos.immutable(), BlockChange.remove(original, originalBe));
+				}
+			} else {
+				changes.put(pos.immutable(), BlockChange.place(now, original, nowBe, originalBe));
+			}
+		}
+		return new Imagination(id, name, createdAt, changes, Map.of());
+	}
+
+	/**
+	 * Restore only what changed vs this snapshot (never rewrite the whole cube).
 	 */
 	public void restore(Minecraft client) {
 		MinecraftServer server = client.getSingleplayerServer();
 		if (server == null || client.player == null) {
-			// Multiplayer should use restoreRemoteClient — full local restore desyncs entities.
-			restoreLocal(client.level);
 			return;
 		}
 		UUID playerId = client.player.getUUID();
-		server.execute(() -> {
+		server.executeBlocking(() -> {
 			var serverPlayer = server.getPlayerList().getPlayer(playerId);
 			if (serverPlayer == null) {
 				return;
 			}
-			ServerLevel level = serverPlayer.level();
-			restoreOnLevel(level, playerId);
+			revertDifferences(serverPlayer.level(), playerId);
 		});
+	}
+
+	/**
+	 * Revert blocks/entities that differ from this snapshot. Must run on the server thread for SP.
+	 */
+	public void revertDifferences(Level level, @Nullable UUID playerId) {
+		Imagination diff = createDiff(level, "restore", UUID.randomUUID(), 0L);
+		HolderLookup.Provider registries = level.registryAccess();
+
+		if (!diff.changes().isEmpty()) {
+			for (Map.Entry<BlockPos, BlockChange> entry : diff.changes().entrySet()) {
+				BlockPos pos = entry.getKey();
+				BlockChange change = entry.getValue();
+				BlockState original = change.originalState();
+				if (original == null) {
+					original = blocks.getOrDefault(pos.asLong(), Blocks.AIR.defaultBlockState());
+				}
+				level.setBlock(pos, original, 3);
+				CompoundTag beTag = change.originalBlockEntity();
+				if (beTag == null) {
+					beTag = blockEntities.get(pos.asLong());
+				}
+				if (beTag != null) {
+					BlockEntity be = level.getBlockEntity(pos);
+					if (be != null) {
+						try {
+							var input = TagValueInput.create(ProblemReporter.DISCARDING, registries, beTag);
+							be.loadWithComponents(input);
+							be.setChanged();
+						} catch (Exception e) {
+							SurvivalCreativityMod.LOGGER.warn("Failed to restore block entity at {}", pos, e);
+						}
+					}
+				}
+			}
+		}
+
+		// Always run — hologram diffs ignore mobs/items, but the real world must not keep them.
+		revertEntities(level, playerId);
+	}
+
+	/**
+	 * Discard entities spawned during imagination and re-add ones removed while editing.
+	 * Applies to all non-player entities in the snapshot radius (mobs, items, etc.).
+	 */
+	public void revertEntities(Level level, @Nullable UUID playerId) {
+		Map<UUID, Entity> live = new HashMap<>();
+		for (Entity entity : level.getEntities(null, bounds())) {
+			if (entity instanceof Player) {
+				continue;
+			}
+			if (playerId != null && entity.getUUID().equals(playerId)) {
+				continue;
+			}
+			live.put(entity.getUUID(), entity);
+		}
+
+		for (Entity entity : List.copyOf(live.values())) {
+			if (!entities.containsKey(entity.getUUID())) {
+				entity.discard();
+				live.remove(entity.getUUID());
+			}
+		}
+
+		for (Map.Entry<UUID, CompoundTag> entry : entities.entrySet()) {
+			UUID uuid = entry.getKey();
+			if (live.containsKey(uuid)) {
+				continue;
+			}
+			Entity entity = EntityNbt.load(level, entry.getValue());
+			if (entity == null) {
+				continue;
+			}
+			entity.setUUID(uuid);
+			if (level instanceof ServerLevel serverLevel) {
+				serverLevel.addFreshEntity(entity);
+			} else if (level instanceof net.minecraft.client.multiplayer.ClientLevel clientLevel) {
+				ClientEntitySpawner.add(clientLevel, entity);
+			}
+		}
 	}
 
 	/**
@@ -197,67 +344,14 @@ public final class WorldSnapshot {
 			}
 		}
 
-		for (Entity entity : level.getEntities(null, bounds())) {
+		for (Entity entity : List.copyOf(level.getEntities(null, bounds()))) {
 			if (entity instanceof Player) {
 				continue;
 			}
-			// ClientEntitySpawner / hologram ghosts use negative network IDs
-			if (entity.getId() < 0) {
+			// Drop anything that wasn't present when imagination started (local spawns),
+			// plus client-only ghosts (negative network IDs).
+			if (entity.getId() < 0 || !entities.containsKey(entity.getUUID())) {
 				entity.discard();
-			}
-		}
-	}
-
-	private void restoreLocal(Level level) {
-		if (level == null) {
-			return;
-		}
-		restoreOnLevel(level, null);
-	}
-
-	private void restoreOnLevel(Level level, @Nullable UUID playerId) {
-		HolderLookup.Provider registries = level.registryAccess();
-
-		for (Map.Entry<Long, BlockState> entry : blocks.entrySet()) {
-			BlockPos pos = BlockPos.of(entry.getKey());
-			level.setBlock(pos, entry.getValue(), 3);
-			CompoundTag beTag = blockEntities.get(entry.getKey());
-			if (beTag != null) {
-				BlockEntity be = level.getBlockEntity(pos);
-				if (be != null) {
-					try {
-						var input = net.minecraft.world.level.storage.TagValueInput.create(
-							net.minecraft.util.ProblemReporter.DISCARDING, registries, beTag);
-						be.loadWithComponents(input);
-						be.setChanged();
-					} catch (Exception e) {
-						SurvivalCreativityMod.LOGGER.warn("Failed to restore block entity at {}", pos, e);
-					}
-				}
-			}
-		}
-
-		// Remove entities currently in the region (except players), then respawn snapshot entities
-		for (Entity entity : level.getEntities(null, bounds())) {
-			if (entity instanceof Player) {
-				continue;
-			}
-			if (playerId != null && entity.getUUID().equals(playerId)) {
-				continue;
-			}
-			entity.discard();
-		}
-
-		for (Map.Entry<UUID, CompoundTag> entry : entities.entrySet()) {
-			Entity entity = EntityNbt.load(level, entry.getValue());
-			if (entity == null) {
-				continue;
-			}
-			entity.setUUID(entry.getKey());
-			if (level instanceof ServerLevel serverLevel) {
-				serverLevel.addFreshEntity(entity);
-			} else if (level instanceof net.minecraft.client.multiplayer.ClientLevel clientLevel) {
-				ClientEntitySpawner.add(clientLevel, entity);
 			}
 		}
 	}

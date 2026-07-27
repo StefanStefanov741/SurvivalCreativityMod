@@ -5,8 +5,8 @@ import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.network.protocol.game.ClientboundGameEventPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerAbilitiesPacket;
-import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket;
+import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
 import net.minecraft.network.protocol.game.ServerboundContainerClickPacket;
 import net.minecraft.network.protocol.game.ServerboundInteractPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
@@ -21,8 +21,9 @@ import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 
 /**
  * Multiplayer imagination stays in the live world: block outbound place/break/move
- * (except AFK heartbeats) and ignore inbound packets that would yank creative mode,
- * inventory, or position. Chunk/block sync still applies so the world keeps rendering.
+ * (except AFK heartbeats / teleport ACKs) and ignore inbound packets that would yank
+ * creative mode or inventory. Chat and player-list packets are never blocked.
+ * Position teleports are ACKed separately (see ImaginationManager.acknowledgeServerTeleport).
  */
 public final class ImaginationPacketGate {
 	private ImaginationPacketGate() {
@@ -34,8 +35,12 @@ public final class ImaginationPacketGate {
 			return false;
 		}
 		if (packet instanceof ServerboundMovePlayerPacket) {
-			// Allow only the AFK heartbeat we inject each tick
+			// Allow only the AFK heartbeat / teleport-confirm moves we inject
 			return !manager.isSendingIdleHeartbeat();
+		}
+		// Never block chat, commands, or teleport accepts
+		if (packet instanceof ServerboundAcceptTeleportationPacket) {
+			return false;
 		}
 		return packet instanceof ServerboundPlayerActionPacket
 			|| packet instanceof ServerboundUseItemOnPacket
@@ -54,9 +59,9 @@ public final class ImaginationPacketGate {
 		if (!manager.isRemoteEditing()) {
 			return false;
 		}
-		// Only yank-prevention; chunks/blocks/entities keep syncing normally.
-		if (packet instanceof ClientboundPlayerPositionPacket
-			|| packet instanceof ClientboundPlayerAbilitiesPacket
+		// Yank-prevention only. Chat, joins, chunks, entities stay live.
+		// Player position is handled specially (ACK without applying) in ClientPacketListenerMixin.
+		if (packet instanceof ClientboundPlayerAbilitiesPacket
 			|| packet instanceof ClientboundSetPlayerInventoryPacket
 			|| packet instanceof ClientboundContainerSetSlotPacket
 			|| packet instanceof ClientboundContainerSetContentPacket) {

@@ -11,6 +11,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.jetbrains.annotations.Nullable;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -52,6 +54,17 @@ public final class ImaginationManager {
 	private boolean remoteSession;
 	/** Local block edits during remote sessions — reapplied when the server syncs chunks. */
 	private final Map<BlockPos, BlockState> remoteOverlay = new HashMap<>();
+	/** Every block touched while editing (SP + MP) — used to revert on disconnect. */
+	private final Set<BlockPos> sessionDirty = new HashSet<>();
+	/**
+	 * Kept after session clear so {@link #ensureWorldRevertedBeforeSave} can strip
+	 * imagination blocks on the server thread right before disk write.
+	 */
+	private boolean quitGuardActive;
+	private WorldSnapshot quitGuardSnapshot;
+	private Set<BlockPos> quitGuardDirty = Set.of();
+	private UUID quitGuardPlayer;
+	private net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> quitGuardDimension;
 	private boolean suppressingRemoteDirty;
 	private boolean sendingIdleHeartbeat;
 	private GameType previousGameType = GameType.SURVIVAL;
@@ -80,9 +93,56 @@ public final class ImaginationManager {
 		return mode == ImaginationMode.EDITING;
 	}
 
+	/** Active edit snapshot, or null when not editing. */
+	public @Nullable WorldSnapshot sessionSnapshot() {
+		return sessionSnapshot;
+	}
+
 	/** Multiplayer local-build session (live world keeps syncing; edits are an overlay). */
 	public boolean isRemoteEditing() {
 		return isEditing() && remoteSession;
+	}
+
+	/** AFK body the server still tracks while you build locally. */
+	public Vec3 bodyPosition() {
+		return bodyPosition;
+	}
+
+	/**
+	 * Server sent a teleport correction. We must ACK it (or the connection desyncs — worse
+	 * with other players online, and chat/signing can break) without yanking the local
+	 * imagination camera/player away from where you're building.
+	 */
+	public void acknowledgeServerTeleport(net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket packet) {
+		Minecraft client = Minecraft.getInstance();
+		if (client.getConnection() == null || bodyPosition == null) {
+			return;
+		}
+		var current = new net.minecraft.world.entity.PositionMoveRotation(
+			bodyPosition, Vec3.ZERO, bodyYRot, bodyXRot);
+		var absolute = net.minecraft.world.entity.PositionMoveRotation.calculateAbsolute(
+			current, packet.change(), packet.relatives());
+		bodyPosition = absolute.position();
+		bodyYRot = absolute.yRot();
+		bodyXRot = absolute.xRot();
+
+		client.getConnection().send(
+			new net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket(packet.id()));
+
+		sendingIdleHeartbeat = true;
+		try {
+			client.getConnection().send(new net.minecraft.network.protocol.game.ServerboundMovePlayerPacket.PosRot(
+				bodyPosition.x,
+				bodyPosition.y,
+				bodyPosition.z,
+				bodyYRot,
+				bodyXRot,
+				true,
+				false
+			));
+		} finally {
+			sendingIdleHeartbeat = false;
+		}
 	}
 
 	public boolean isSendingIdleHeartbeat() {
@@ -161,17 +221,62 @@ public final class ImaginationManager {
 
 		remoteSession = client.getSingleplayerServer() == null;
 		remoteOverlay.clear();
+		sessionDirty.clear();
 		suppressingRemoteDirty = false;
 		working = session;
 		previousGameType = client.gameMode.getPlayerMode();
 		snapshotInventory(client.player);
 		snapshotBody(client.player);
-		sessionSnapshot = WorldSnapshot.capture(
-			level,
-			client.player.position(),
-			WorldSnapshot.DEFAULT_RADIUS,
-			client.player.getUUID()
-		);
+
+		// SP: capture from the integrated server so we never snapshot client air for unloaded chunks.
+		if (!remoteSession) {
+			MinecraftServer server = client.getSingleplayerServer();
+			UUID uuid = client.player.getUUID();
+			Vec3 center = client.player.position();
+			WorldSnapshot[] holder = new WorldSnapshot[1];
+			if (server != null) {
+				server.executeBlocking(() -> {
+					var serverPlayer = server.getPlayerList().getPlayer(uuid);
+					if (serverPlayer != null) {
+						holder[0] = WorldSnapshot.capture(
+							serverPlayer.level(),
+							center,
+							WorldSnapshot.DEFAULT_RADIUS,
+							uuid
+						);
+					}
+				});
+			}
+			sessionSnapshot = holder[0];
+			if (sessionSnapshot == null) {
+				client.player.sendOverlayMessage(Component.translatable("message.survivalcreativitymod.save_failed"));
+				working = null;
+				inventorySnapshot = new ItemStack[0];
+				bodyPosition = null;
+				return;
+			}
+		} else {
+			sessionSnapshot = WorldSnapshot.capture(
+				level,
+				client.player.position(),
+				WorldSnapshot.DEFAULT_RADIUS,
+				client.player.getUUID()
+			);
+		}
+
+		// Checkpoint survival inventory/mode/position BEFORE switching to creative.
+		if (!remoteSession) {
+			ImaginationRecovery.write(
+				client,
+				client.player.getUUID(),
+				previousGameType,
+				copyInventorySnapshot(),
+				selectedSlotSnapshot,
+				bodyPosition,
+				bodyYRot,
+				bodyXRot
+			);
+		}
 
 		client.gui.setScreen(null);
 		setCreativeMode(client, true);
@@ -181,6 +286,7 @@ public final class ImaginationManager {
 		}
 
 		mode = ImaginationMode.EDITING;
+		ImaginationWorldControls.INSTANCE.beginSession(client, remoteSession);
 		if (existing) {
 			client.player.sendOverlayMessage(
 				Component.translatable(
@@ -236,6 +342,24 @@ public final class ImaginationManager {
 		if (sessionSnapshot == null || working == null || client.level == null) {
 			return null;
 		}
+		if (!remoteSession) {
+			MinecraftServer server = client.getSingleplayerServer();
+			if (server == null || client.player == null) {
+				return null;
+			}
+			UUID uuid = client.player.getUUID();
+			String name = working.name();
+			UUID id = working.id();
+			long createdAt = working.createdAt();
+			Imagination[] holder = new Imagination[1];
+			server.executeBlocking(() -> {
+				var serverPlayer = server.getPlayerList().getPlayer(uuid);
+				if (serverPlayer != null) {
+					holder[0] = sessionSnapshot.createDiff(serverPlayer.level(), name, id, createdAt);
+				}
+			});
+			return holder[0];
+		}
 		return sessionSnapshot.createDiff(
 			client.level,
 			working.name(),
@@ -263,6 +387,7 @@ public final class ImaginationManager {
 			if (client.player != null && bodyPosition != null) {
 				client.player.snapTo(bodyPosition.x, bodyPosition.y, bodyPosition.z, bodyYRot, bodyXRot);
 				client.player.setDeltaMovement(Vec3.ZERO);
+				client.player.refreshChatAbilities();
 			}
 		} else if (sessionSnapshot != null) {
 			sessionSnapshot.restore(client);
@@ -270,14 +395,11 @@ public final class ImaginationManager {
 		}
 
 		restoreInventory(client.player);
-		bodyPosition = null;
 		setCreativeMode(client, false);
-
-		working = null;
-		sessionSnapshot = null;
-		remoteSession = false;
-		remoteOverlay.clear();
-		mode = ImaginationMode.IDLE;
+		ImaginationWorldControls.INSTANCE.endSession(client);
+		ImaginationRecovery.clear(client);
+		ImaginationRecovery.clearPendingWorldRevert(client);
+		clearSessionState();
 
 		if (client.player != null) {
 			if (saved) {
@@ -288,8 +410,355 @@ public final class ImaginationManager {
 		}
 	}
 
-	public void onRemoteClientBlockChanged(BlockPos pos, BlockState state) {
-		if (!remoteSession || !isEditing() || suppressingRemoteDirty || sessionSnapshot == null) {
+	/**
+	 * Called at the very start of Save &amp; Quit / disconnect — restore survival player state,
+	 * arm a quit-guard so the next server save strips imagination blocks, and keep a pending
+	 * undo file for the following join.
+	 */
+	public void prepareForWorldSave(Minecraft client) {
+		if (mode != ImaginationMode.EDITING || remoteSession) {
+			return;
+		}
+
+		GameType restoreMode = previousGameType != null ? previousGameType : GameType.SURVIVAL;
+		ItemStack[] invCopy = copyInventorySnapshot();
+		int selected = selectedSlotSnapshot;
+		Vec3 body = bodyPosition;
+		float yRot = bodyYRot;
+		float xRot = bodyXRot;
+		WorldSnapshot snapshot = sessionSnapshot;
+		Set<BlockPos> dirty = Set.copyOf(sessionDirty);
+		MinecraftServer server = client.getSingleplayerServer();
+		UUID uuid = client.player != null ? client.player.getUUID() : null;
+
+		// Arm quit-guard BEFORE any save path runs (client-thread restore is unreliable).
+		if (snapshot != null) {
+			quitGuardActive = true;
+			quitGuardSnapshot = snapshot;
+			quitGuardDirty = dirty;
+			quitGuardPlayer = uuid;
+			quitGuardDimension = client.level != null ? client.level.dimension() : null;
+		}
+
+		// Auto-save hologram + pending revert from the CLIENT level (no server thread needed).
+		autoSaveDisconnected(client);
+
+		ImaginationWorldControls.INSTANCE.endSession(client);
+
+		if (uuid != null) {
+			ImaginationRecovery.write(
+				client,
+				uuid,
+				restoreMode,
+				invCopy,
+				selected,
+				body,
+				yRot,
+				xRot
+			);
+		}
+
+		// Best-effort immediate revert (save mixin is the reliable path).
+		if (server != null && snapshot != null) {
+			Runnable restoreWorldAndPlayer = () -> {
+				ensureWorldRevertedBeforeSave(server);
+				var serverPlayer = uuid != null ? server.getPlayerList().getPlayer(uuid) : null;
+				if (serverPlayer == null) {
+					SurvivalCreativityMod.LOGGER.warn(
+						"prepareForWorldSave: ServerPlayer missing — quit-guard + pending revert kept");
+					return;
+				}
+				serverPlayer.setGameMode(restoreMode);
+				if (invCopy.length > 0) {
+					Inventory inventory = serverPlayer.getInventory();
+					int size = Math.min(invCopy.length, inventory.getContainerSize());
+					for (int i = 0; i < size; i++) {
+						inventory.setItem(i, invCopy[i].copy());
+					}
+					inventory.setSelectedSlot(selected);
+				}
+				if (body != null) {
+					serverPlayer.teleportTo(body.x, body.y, body.z);
+					serverPlayer.setYRot(yRot);
+					serverPlayer.setXRot(xRot);
+					serverPlayer.setDeltaMovement(Vec3.ZERO);
+				}
+				server.getPlayerList().saveAll();
+			};
+			try {
+				if (server.isSameThread()) {
+					restoreWorldAndPlayer.run();
+				} else {
+					server.executeBlocking(restoreWorldAndPlayer);
+				}
+			} catch (Exception e) {
+				SurvivalCreativityMod.LOGGER.warn(
+					"prepareForWorldSave immediate restore failed — relying on save mixin / join revert", e);
+			}
+		}
+
+		if (client.player != null) {
+			if (body != null) {
+				client.player.snapTo(body.x, body.y, body.z, yRot, xRot);
+				client.player.setDeltaMovement(Vec3.ZERO);
+			}
+			if (invCopy.length > 0) {
+				Inventory inventory = client.player.getInventory();
+				int size = Math.min(invCopy.length, inventory.getContainerSize());
+				for (int i = 0; i < size; i++) {
+					inventory.setItem(i, invCopy[i].copy());
+				}
+				inventory.setSelectedSlot(selected);
+			}
+			var abilities = client.player.getAbilities();
+			restoreMode.updatePlayerAbilities(abilities);
+			abilities.flying = false;
+		}
+		if (client.gameMode != null) {
+			client.gameMode.setLocalMode(restoreMode);
+		}
+
+		// Clear live session but KEEP quit-guard until after saves / next join.
+		clearSessionState();
+		preview = null;
+		ghostEntities = List.of();
+		suppressedPreview.clear();
+	}
+
+	/**
+	 * Called on the integrated server thread at the start of every world save while a
+	 * quit-guard is armed. This is what actually prevents imagination blocks hitting disk.
+	 */
+	public void ensureWorldRevertedBeforeSave(MinecraftServer server) {
+		if (!quitGuardActive || quitGuardSnapshot == null || server == null) {
+			return;
+		}
+		suppressingRemoteDirty = true;
+		try {
+			for (var level : server.getAllLevels()) {
+				if (quitGuardDimension != null && !level.dimension().equals(quitGuardDimension)) {
+					continue;
+				}
+				if (!quitGuardDirty.isEmpty()) {
+					quitGuardSnapshot.restorePositions(level, quitGuardDirty);
+				}
+				// Full scan catches anything dirty-tracking missed (fluids, pistons, etc.).
+				quitGuardSnapshot.revertDifferences(level, quitGuardPlayer);
+			}
+			SurvivalCreativityMod.LOGGER.info(
+				"Quit-guard reverted imagination blocks before world save ({} dirty tracked)",
+				quitGuardDirty.size());
+		} catch (Exception e) {
+			SurvivalCreativityMod.LOGGER.error("Quit-guard world revert failed", e);
+		} finally {
+			suppressingRemoteDirty = false;
+		}
+	}
+
+	private void clearQuitGuard() {
+		quitGuardActive = false;
+		quitGuardSnapshot = null;
+		quitGuardDirty = Set.of();
+		quitGuardPlayer = null;
+		quitGuardDimension = null;
+	}
+
+	/**
+	 * Persist in-progress imagination so a crash / disconnect does not lose the build.
+	 * Uses the client level so it works even when the server thread is unavailable.
+	 */
+	private void autoSaveDisconnected(Minecraft client) {
+		if (sessionSnapshot == null && quitGuardSnapshot == null) {
+			return;
+		}
+		WorldSnapshot snapshot = sessionSnapshot != null ? sessionSnapshot : quitGuardSnapshot;
+		Set<BlockPos> dirty = !sessionDirty.isEmpty()
+			? Set.copyOf(sessionDirty)
+			: quitGuardDirty;
+		if (working == null || client.level == null || snapshot == null) {
+			return;
+		}
+		try {
+			Imagination diff;
+			if (dirty != null && !dirty.isEmpty()) {
+				diff = snapshot.createDiffFromPositions(
+					client.level,
+					dirty,
+					working.name(),
+					UUID.randomUUID(),
+					System.currentTimeMillis()
+				);
+				// Also merge a full client scan so fluid/neighbor updates are included.
+				Imagination full = snapshot.createDiff(
+					client.level,
+					working.name(),
+					diff.id(),
+					diff.createdAt()
+				);
+				if (full != null && !full.isEmpty()) {
+					diff = full;
+				}
+			} else {
+				diff = snapshot.createDiff(
+					client.level,
+					working.name(),
+					UUID.randomUUID(),
+					System.currentTimeMillis()
+				);
+			}
+			if (diff == null || diff.isEmpty()) {
+				// Do NOT clear pending — a previous write may still be needed.
+				return;
+			}
+			String stamp = java.time.LocalDateTime.now()
+				.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+			diff.setName("Disconnected " + stamp);
+			diff = new Imagination(
+				UUID.randomUUID(),
+				diff.name(),
+				System.currentTimeMillis(),
+				diff.changes(),
+				diff.entityChanges()
+			);
+			ImaginationStorage.save(client, diff);
+			ImaginationRecovery.writePendingWorldRevert(client, diff);
+			SurvivalCreativityMod.LOGGER.info("Auto-saved interrupted imagination as \"{}\"", diff.name());
+		} catch (Exception e) {
+			SurvivalCreativityMod.LOGGER.error("Failed to auto-save disconnected imagination", e);
+		}
+	}
+
+	/**
+	 * If the player force-quit mid-imagination, re-apply the survival checkpoint on join
+	 * and undo any imagined blocks that were left in the real world.
+	 */
+	public void applyPendingRecovery(Minecraft client) {
+		if (client.player == null) {
+			return;
+		}
+		MinecraftServer server = client.getSingleplayerServer();
+		if (server == null) {
+			ImaginationRecovery.clear(client);
+			ImaginationRecovery.clearPendingWorldRevert(client);
+			clearQuitGuard();
+			return;
+		}
+
+		boolean hadPlayerCheckpoint = ImaginationRecovery.exists(client);
+		boolean hadWorldRevert = ImaginationRecovery.hasPendingWorldRevert(client);
+		if (!hadPlayerCheckpoint && !hadWorldRevert && !quitGuardActive) {
+			return;
+		}
+
+		UUID uuid = client.player.getUUID();
+		boolean[] ok = {false};
+		try {
+			server.executeBlocking(() -> {
+				var serverPlayer = server.getPlayerList().getPlayer(uuid);
+				if (serverPlayer == null) {
+					return;
+				}
+				if (hadPlayerCheckpoint) {
+					ok[0] = ImaginationRecovery.applyTo(serverPlayer, client);
+				}
+				if (quitGuardActive && quitGuardSnapshot != null) {
+					ensureWorldRevertedBeforeSave(server);
+					ok[0] = true;
+				}
+				if (hadWorldRevert) {
+					if (ImaginationRecovery.applyPendingWorldRevert(serverPlayer.level(), client)) {
+						ok[0] = true;
+						ImaginationRecovery.clearPendingWorldRevert(client);
+					}
+				} else {
+					ImaginationRecovery.clearPendingWorldRevert(client);
+				}
+				// Persist the cleaned world so leftovers cannot return on next quit.
+				server.saveEverything(false, true, true);
+			});
+		} catch (Exception e) {
+			SurvivalCreativityMod.LOGGER.warn("Failed to apply recovery on server join", e);
+		}
+		if (hadPlayerCheckpoint) {
+			ImaginationRecovery.applyTo(client.player, client);
+			ImaginationRecovery.clear(client);
+		}
+		clearQuitGuard();
+		if (ok[0] || hadPlayerCheckpoint || hadWorldRevert) {
+			client.player.sendOverlayMessage(
+				Component.translatable("message.survivalcreativitymod.recovery_restored"));
+		}
+	}
+
+	/**
+	 * Leaving the world while editing: auto-save progress and restore survival player state.
+	 * Terrain is not fully rewritten here (unsafe during teardown).
+	 */
+	public void abortSessionForDisconnect(Minecraft client) {
+		if (mode != ImaginationMode.EDITING) {
+			return;
+		}
+		if (remoteSession) {
+			autoSaveDisconnected(client);
+			ImaginationWorldControls.INSTANCE.endSession(client);
+			if (sessionSnapshot != null && client.level instanceof ClientLevel clientLevel) {
+				suppressingRemoteDirty = true;
+				try {
+					sessionSnapshot.restoreRemoteClient(clientLevel, Set.copyOf(remoteOverlay.keySet()));
+				} finally {
+					suppressingRemoteDirty = false;
+					remoteOverlay.clear();
+				}
+			}
+			if (client.player != null && bodyPosition != null) {
+				client.player.snapTo(bodyPosition.x, bodyPosition.y, bodyPosition.z, bodyYRot, bodyXRot);
+				client.player.setDeltaMovement(Vec3.ZERO);
+			}
+			restoreInventory(client.player);
+			if (client.gameMode != null && previousGameType != null) {
+				client.gameMode.setLocalMode(previousGameType);
+			}
+			clearSessionState();
+			preview = null;
+			ghostEntities = List.of();
+			suppressedPreview.clear();
+			return;
+		}
+		prepareForWorldSave(client);
+	}
+
+	public void onDisconnect() {
+		abortSessionForDisconnect(Minecraft.getInstance());
+	}
+
+	/** After disconnect saves finish — drop in-memory quit-guard (pending file remains for join). */
+	public void onDisconnectFinished() {
+		clearQuitGuard();
+	}
+
+	private ItemStack[] copyInventorySnapshot() {
+		ItemStack[] copy = new ItemStack[inventorySnapshot.length];
+		for (int i = 0; i < inventorySnapshot.length; i++) {
+			copy[i] = inventorySnapshot[i] == null ? ItemStack.EMPTY : inventorySnapshot[i].copy();
+		}
+		return copy;
+	}
+
+	private void clearSessionState() {
+		working = null;
+		sessionSnapshot = null;
+		remoteSession = false;
+		remoteOverlay.clear();
+		sessionDirty.clear();
+		suppressingRemoteDirty = false;
+		sendingIdleHeartbeat = false;
+		inventorySnapshot = new ItemStack[0];
+		bodyPosition = null;
+		mode = ImaginationMode.IDLE;
+	}
+
+	public void onSessionBlockChanged(BlockPos pos, BlockState state) {
+		if (!isEditing() || suppressingRemoteDirty || sessionSnapshot == null) {
 			return;
 		}
 		if (!sessionSnapshot.contains(pos)) {
@@ -298,10 +767,19 @@ public final class ImaginationManager {
 		BlockState original = sessionSnapshot.getBlock(pos);
 		BlockPos key = pos.immutable();
 		if (original != null && original.equals(state)) {
+			sessionDirty.remove(key);
 			remoteOverlay.remove(key);
 		} else {
-			remoteOverlay.put(key, state);
+			sessionDirty.add(key);
+			if (remoteSession) {
+				remoteOverlay.put(key, state);
+			}
 		}
+	}
+
+	@Deprecated
+	public void onRemoteClientBlockChanged(BlockPos pos, BlockState state) {
+		onSessionBlockChanged(pos, state);
 	}
 
 	public void reapplyRemoteOverlay(BlockPos pos) {
@@ -464,23 +942,8 @@ public final class ImaginationManager {
 		}
 	}
 
-	public void onDisconnect() {
-		working = null;
-		preview = null;
-		ghostEntities = List.of();
-		sessionSnapshot = null;
-		remoteSession = false;
-		remoteOverlay.clear();
-		suppressingRemoteDirty = false;
-		sendingIdleHeartbeat = false;
-		suppressedPreview.clear();
-		inventorySnapshot = new ItemStack[0];
-		bodyPosition = null;
-		mode = ImaginationMode.IDLE;
-	}
-
 	private void setCreativeMode(Minecraft client, boolean creative) {
-		GameType target = creative ? GameType.CREATIVE : previousGameType;
+		GameType target = creative ? GameType.CREATIVE : (previousGameType != null ? previousGameType : GameType.SURVIVAL);
 		if (client.gameMode != null) {
 			client.gameMode.setLocalMode(target);
 		}
@@ -488,12 +951,17 @@ public final class ImaginationManager {
 			MinecraftServer server = client.getSingleplayerServer();
 			if (server != null && client.player != null) {
 				UUID uuid = client.player.getUUID();
-				server.execute(() -> {
+				Runnable apply = () -> {
 					var serverPlayer = server.getPlayerList().getPlayer(uuid);
 					if (serverPlayer != null) {
 						serverPlayer.setGameMode(target);
 					}
-				});
+				};
+				if (server.isSameThread()) {
+					apply.run();
+				} else {
+					server.executeBlocking(apply);
+				}
 			}
 		}
 		if (client.player != null) {
@@ -501,7 +969,7 @@ public final class ImaginationManager {
 				applyLocalCreativeAbilities(client.player, true);
 			} else {
 				var abilities = client.player.getAbilities();
-				previousGameType.updatePlayerAbilities(abilities);
+				target.updatePlayerAbilities(abilities);
 				abilities.flying = false;
 				// Avoid syncing fake abilities to a remote server
 				if (!remoteSession) {
@@ -556,22 +1024,29 @@ public final class ImaginationManager {
 		double x = bodyPosition.x;
 		double y = bodyPosition.y;
 		double z = bodyPosition.z;
-		player.snapTo(x, y, z, bodyYRot, bodyXRot);
+		float yRot = bodyYRot;
+		float xRot = bodyXRot;
+		player.snapTo(x, y, z, yRot, xRot);
 		player.setDeltaMovement(Vec3.ZERO);
 
 		MinecraftServer server = client.getSingleplayerServer();
 		if (server != null) {
-			server.execute(() -> {
-				var serverPlayer = server.getPlayerList().getPlayer(player.getUUID());
+			UUID uuid = player.getUUID();
+			Runnable teleport = () -> {
+				var serverPlayer = server.getPlayerList().getPlayer(uuid);
 				if (serverPlayer != null) {
 					serverPlayer.teleportTo(x, y, z);
-					serverPlayer.setYRot(bodyYRot);
-					serverPlayer.setXRot(bodyXRot);
+					serverPlayer.setYRot(yRot);
+					serverPlayer.setXRot(xRot);
 					serverPlayer.setDeltaMovement(Vec3.ZERO);
 				}
-			});
+			};
+			if (server.isSameThread()) {
+				teleport.run();
+			} else {
+				server.executeBlocking(teleport);
+			}
 		}
-		bodyPosition = null;
 	}
 
 	private void snapshotInventory(LocalPlayer player) {
@@ -587,12 +1062,40 @@ public final class ImaginationManager {
 		if (player == null || inventorySnapshot.length == 0) {
 			return;
 		}
+		ItemStack[] copy = copyInventorySnapshot();
+		int selected = selectedSlotSnapshot;
+
 		Inventory inventory = player.getInventory();
-		int size = Math.min(inventorySnapshot.length, inventory.getContainerSize());
+		int size = Math.min(copy.length, inventory.getContainerSize());
 		for (int i = 0; i < size; i++) {
-			inventory.setItem(i, inventorySnapshot[i].copy());
+			inventory.setItem(i, copy[i].copy());
 		}
-		inventory.setSelectedSlot(selectedSlotSnapshot);
+		inventory.setSelectedSlot(selected);
+
+		if (!remoteSession) {
+			MinecraftServer server = Minecraft.getInstance().getSingleplayerServer();
+			if (server != null) {
+				UUID uuid = player.getUUID();
+				Runnable apply = () -> {
+					var serverPlayer = server.getPlayerList().getPlayer(uuid);
+					if (serverPlayer == null) {
+						return;
+					}
+					Inventory serverInv = serverPlayer.getInventory();
+					int serverSize = Math.min(copy.length, serverInv.getContainerSize());
+					for (int i = 0; i < serverSize; i++) {
+						serverInv.setItem(i, copy[i].copy());
+					}
+					serverInv.setSelectedSlot(selected);
+				};
+				if (server.isSameThread()) {
+					apply.run();
+				} else {
+					server.executeBlocking(apply);
+				}
+			}
+		}
+
 		inventorySnapshot = new ItemStack[0];
 	}
 }

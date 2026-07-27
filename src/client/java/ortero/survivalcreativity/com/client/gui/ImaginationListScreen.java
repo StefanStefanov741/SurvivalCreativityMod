@@ -34,15 +34,19 @@ public class ImaginationListScreen extends Screen {
 			Imagination imagination = imaginations.get(i);
 			int row = i - scroll;
 			int y = startY + row * 24;
-			String label = imagination.name() + " (" + imagination.changes().size() + " blocks)";
+			String label = imagination.name() + " (" + imagination.changes().size() + ")";
 
 			addRenderableWidget(Button.builder(Component.literal(label), b -> {
 				ImaginationManager.INSTANCE.startPreview(minecraft, imagination);
-			}).bounds(width / 2 - 170, y, 200, 20).build());
+			}).bounds(width / 2 - 200, y, 145, 20).build());
+
+			addRenderableWidget(Button.builder(Component.translatable("screen.survivalcreativitymod.blocks_btn"), b -> {
+				minecraft.gui.setScreen(new ImaginationBlocksScreen(this, imagination));
+			}).bounds(width / 2 - 50, y, 55, 20).build());
 
 			addRenderableWidget(Button.builder(Component.translatable("screen.survivalcreativitymod.edit"), b -> {
 				ImaginationManager.INSTANCE.enterEdit(minecraft, imagination);
-			}).bounds(width / 2 + 35, y, 50, 20).build());
+			}).bounds(width / 2 + 10, y, 50, 20).build());
 
 			addRenderableWidget(Button.builder(Component.translatable("screen.survivalcreativitymod.delete"), b -> {
 				try {
@@ -53,19 +57,19 @@ public class ImaginationListScreen extends Screen {
 				} catch (IOException e) {
 					SurvivalCreativityMod.LOGGER.error("Failed to delete imagination", e);
 				}
-			}).bounds(width / 2 + 90, y, 70, 20).build());
+			}).bounds(width / 2 + 65, y, 70, 20).build());
 		}
 
 		if (imaginations.size() > visible) {
 			addRenderableWidget(Button.builder(Component.literal("▲"), b -> {
 				scroll = Math.max(0, scroll - 1);
 				rebuildWidgets();
-			}).bounds(width / 2 - 200, startY, 20, 20).build());
+			}).bounds(width / 2 - 230, startY, 20, 20).build());
 
 			addRenderableWidget(Button.builder(Component.literal("▼"), b -> {
 				scroll = Math.min(Math.max(0, imaginations.size() - visible), scroll + 1);
 				rebuildWidgets();
-			}).bounds(width / 2 - 200, startY + 24, 20, 20).build());
+			}).bounds(width / 2 - 230, startY + 24, 20, 20).build());
 		}
 
 		addRenderableWidget(Button.builder(Component.translatable("gui.done"), button -> onClose())

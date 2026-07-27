@@ -15,6 +15,7 @@ import net.minecraft.world.level.material.FluidState;
 
 import ortero.survivalcreativity.com.client.imagination.BlockChange;
 import ortero.survivalcreativity.com.client.imagination.Imagination;
+import ortero.survivalcreativity.com.client.imagination.ImaginationFluids;
 import ortero.survivalcreativity.com.client.imagination.ImaginationManager;
 
 /**
@@ -39,7 +40,7 @@ final class HologramBlockGetter implements BlockAndTintGetter {
 		}
 		BlockChange change = imagination.get(pos);
 		if (change != null && change.placement()) {
-			return change.imaginedState();
+			return ImaginationFluids.asStill(change.imaginedState());
 		}
 		return Blocks.AIR.defaultBlockState();
 	}

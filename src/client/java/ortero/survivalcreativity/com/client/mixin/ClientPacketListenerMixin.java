@@ -22,9 +22,21 @@ import ortero.survivalcreativity.com.client.imagination.ImaginationPacketGate;
 
 @Mixin(ClientPacketListener.class)
 public abstract class ClientPacketListenerMixin {
+	@Inject(method = "handleSetTime", at = @At("HEAD"), cancellable = true)
+	private void survivalcreativity$ignoreServerTime(net.minecraft.network.protocol.game.ClientboundSetTimePacket packet, CallbackInfo ci) {
+		if (ImaginationManager.INSTANCE.isRemoteEditing()) {
+			ci.cancel();
+		}
+	}
+
 	@Inject(method = "handleMovePlayer", at = @At("HEAD"), cancellable = true)
 	private void survivalcreativity$movePlayer(ClientboundPlayerPositionPacket packet, CallbackInfo ci) {
-		cancelIfNeeded(packet, ci);
+		if (!ImaginationManager.INSTANCE.isRemoteEditing()) {
+			return;
+		}
+		// Must ACK teleports without applying them to the flying local player.
+		ImaginationManager.INSTANCE.acknowledgeServerTeleport(packet);
+		ci.cancel();
 	}
 
 	@Inject(method = "handlePlayerAbilities", at = @At("HEAD"), cancellable = true)

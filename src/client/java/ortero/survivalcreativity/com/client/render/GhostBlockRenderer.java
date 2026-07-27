@@ -1,23 +1,27 @@
 package ortero.survivalcreativity.com.client.render;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.QuadInstance;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.color.block.BlockTintSource;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
 import net.minecraft.client.renderer.block.FluidModel;
-import net.minecraft.client.renderer.block.MovingBlockRenderState;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
+import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.Holder;
+import net.minecraft.client.resources.model.geometry.BakedQuad;
+import net.minecraft.util.ARGB;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
@@ -28,9 +32,13 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 
 import org.slf4j.Logger;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import ortero.survivalcreativity.com.SurvivalCreativityMod;
 import ortero.survivalcreativity.com.client.imagination.BlockChange;
 import ortero.survivalcreativity.com.client.imagination.Imagination;
+import ortero.survivalcreativity.com.client.imagination.ImaginationFluids;
 import ortero.survivalcreativity.com.client.imagination.ImaginationManager;
 
 /**
@@ -38,12 +46,15 @@ import ortero.survivalcreativity.com.client.imagination.ImaginationManager;
  */
 public final class GhostBlockRenderer {
 	private static final Logger LOGGER = SurvivalCreativityMod.LOGGER;
-	private static final int GHOST_OUTLINE = 0xAA60C8FF;
-	private static final int BREAK_OUTLINE = 0xFFFF5555;
-	private static final int ENTITY_GHOST_OUTLINE = 0xFF60C8FF;
-	private static final int ENTITY_BREAK_OUTLINE = 0xFFFF5555;
+	/** ~60% opaque ghost blocks. */
+	private static final int HOLOGRAM_TINT = 0x99FFFFFF;
+	private static final int GHOST_OUTLINE = 0x9960C8FF;
+	private static final int BREAK_OUTLINE = 0xB3FF5555;
+	private static final int ENTITY_GHOST_OUTLINE = 0x9960C8FF;
+	private static final int ENTITY_BREAK_OUTLINE = 0xB3FF5555;
 	private static final int FULL_BRIGHT = 0xF000F0;
-	private static final int FLUID_ALPHA = 160;
+	private static final int FLUID_ALPHA = 153;
+	private static final int[] NO_TINT_LAYERS = new int[0];
 	private static final double RENDER_DISTANCE_SQ = 96.0 * 96.0;
 
 	private GhostBlockRenderer() {
@@ -111,18 +122,20 @@ public final class GhostBlockRenderer {
 		BlockPos pos,
 		BlockState state
 	) {
-		FluidState fluid = state.getFluidState();
+		// Hologram fluids always draw as still sources (safe + matches MP look).
+		FluidState fluid = ImaginationFluids.asStill(state.getFluidState());
 		if (!fluid.isEmpty()) {
-			submitGhostFluid(client, collector, poseStack, hologramBlocks, camera, pos, state, fluid);
+			submitGhostFluid(client, collector, poseStack, level, hologramBlocks, camera, pos, fluid);
 		}
 
 		VoxelShape shape = state.getShape(level, pos, CollisionContext.empty());
 		if (!state.isAir() && (fluid.isEmpty() || !shape.isEmpty())) {
-			submitGhostSolid(collector, poseStack, level, camera, pos, state);
+			submitGhostSolid(client, collector, poseStack, level, camera, pos, state);
 		}
 	}
 
 	private static void submitGhostSolid(
+		Minecraft client,
 		SubmitNodeCollector collector,
 		PoseStack poseStack,
 		ClientLevel level,
@@ -130,13 +143,37 @@ public final class GhostBlockRenderer {
 		BlockPos pos,
 		BlockState state
 	) {
-		MovingBlockRenderState moving = createMovingBlock(level, pos, state);
+		var model = client.getModelManager().getBlockStateModelSet().get(state);
+		List<BlockStateModelPart> parts = new ArrayList<>();
+		model.collectParts(RandomSource.create(pos.asLong()), parts);
+		if (parts.isEmpty()) {
+			return;
+		}
+
+		int[] tintLayers = resolveTintLayers(client, state, level, pos);
 
 		poseStack.pushPose();
 		poseStack.translate(pos.getX() - camera.x, pos.getY() - camera.y, pos.getZ() - camera.z);
 		poseStack.translate(0.02, 0.02, 0.02);
 		poseStack.scale(0.96f, 0.96f, 0.96f);
-		collector.submitMovingBlock(poseStack, moving, GHOST_OUTLINE);
+
+		// submitBlockModel hardcodes tintColor to -1 (fully opaque); the last arg is outline-only.
+		// Draw quads ourselves so vertex alpha is actually applied.
+		collector.submitCustomGeometry(poseStack, RenderTypes.translucentMovingBlock(), (pose, consumer) -> {
+			QuadInstance instance = new QuadInstance();
+			instance.setLightCoords(FULL_BRIGHT);
+			instance.setOverlayCoords(OverlayTexture.NO_OVERLAY);
+			for (BlockStateModelPart part : parts) {
+				for (Direction direction : Direction.values()) {
+					for (BakedQuad quad : part.getQuads(direction)) {
+						putGhostQuad(pose, consumer, instance, quad, tintLayers);
+					}
+				}
+				for (BakedQuad quad : part.getQuads(null)) {
+					putGhostQuad(pose, consumer, instance, quad, tintLayers);
+				}
+			}
+		});
 
 		VoxelShape shape = state.getShape(level, pos, CollisionContext.empty());
 		if (!shape.isEmpty()) {
@@ -145,36 +182,64 @@ public final class GhostBlockRenderer {
 		poseStack.popPose();
 	}
 
+	private static void putGhostQuad(
+		PoseStack.Pose pose,
+		VertexConsumer consumer,
+		QuadInstance instance,
+		BakedQuad quad,
+		int[] tintLayers
+	) {
+		int tintIndex = quad.materialInfo().tintIndex();
+		int color = HOLOGRAM_TINT;
+		if (tintIndex != -1 && tintIndex < tintLayers.length) {
+			color = ARGB.multiply(HOLOGRAM_TINT, tintLayers[tintIndex]);
+		}
+		instance.setColor(color);
+		consumer.putBakedQuad(pose, quad, instance);
+	}
+
+	/** Biome/foliage/grass tints so holograms aren't greyscale; alpha forced opaque then multiplied by hologram tint. */
+	private static int[] resolveTintLayers(Minecraft client, BlockState state, ClientLevel level, BlockPos pos) {
+		List<BlockTintSource> sources = client.getBlockColors().getTintSources(state);
+		if (sources.isEmpty()) {
+			return NO_TINT_LAYERS;
+		}
+		int[] layers = new int[sources.size()];
+		for (int i = 0; i < sources.size(); i++) {
+			layers[i] = ARGB.opaque(sources.get(i).colorInWorld(state, level, pos));
+		}
+		return layers;
+	}
+
 	/**
-	 * Fluids have empty block models, so we draw a textured water/lava box in block-local space
-	 * (same camera convention as solid hologram blocks).
+	 * Fluids have empty block models, so we draw a textured water/lava box in block-local space.
+	 * Always uses the still fluid model + biome/lava tint (flowing hologram states crash or NPE).
 	 */
 	private static void submitGhostFluid(
 		Minecraft client,
 		SubmitNodeCollector collector,
 		PoseStack poseStack,
+		ClientLevel level,
 		HologramBlockGetter hologramBlocks,
 		Vec3 camera,
 		BlockPos pos,
-		BlockState state,
 		FluidState fluid
 	) {
 		FluidModel model = client.getModelManager().getFluidStateModelSet().get(fluid);
+		if (model == null || model.stillMaterial() == null || model.flowingMaterial() == null) {
+			return;
+		}
 		TextureAtlasSprite still = model.stillMaterial().sprite();
 		TextureAtlasSprite flowing = model.flowingMaterial().sprite();
-
-		float height = fluid.getHeight(hologramBlocks, pos);
-		if (height <= 0.001f) {
-			height = Math.max(fluid.getOwnHeight(), 0.125f);
+		if (still == null || flowing == null) {
+			return;
 		}
 
-		int tint = model.tintSource().colorInWorld(state, hologramBlocks, pos);
+		float height = Math.max(fluid.getOwnHeight(), 0.8888889f);
+		int tint = fluidTint(model, level, pos, fluid);
 		int r = (tint >> 16) & 0xFF;
 		int g = (tint >> 8) & 0xFF;
 		int b = tint & 0xFF;
-		if (r == 0 && g == 0 && b == 0 && tint == -1) {
-			r = g = b = 255;
-		}
 
 		boolean up = hologramBlocks.getFluidState(pos.above()).isEmpty();
 		boolean down = shouldDrawFluidFace(hologramBlocks, pos, Direction.DOWN, fluid);
@@ -221,6 +286,24 @@ public final class GhostBlockRenderer {
 		poseStack.popPose();
 	}
 
+	private static int fluidTint(FluidModel model, ClientLevel level, BlockPos pos, FluidState fluid) {
+		var tintSource = model.tintSource();
+		if (tintSource != null) {
+			try {
+				return tintSource.colorInWorld(fluid.createLegacyBlock(), level, pos);
+			} catch (Exception ignored) {
+				// fall through
+			}
+		}
+		if (fluid.is(net.minecraft.tags.FluidTags.LAVA)) {
+			return 0xFFFFFF;
+		}
+		if (fluid.is(net.minecraft.tags.FluidTags.WATER)) {
+			return net.minecraft.client.renderer.BiomeColors.getAverageWaterColor(level, pos);
+		}
+		return 0xFFFFFF;
+	}
+
 	private static boolean shouldDrawFluidFace(HologramBlockGetter blocks, BlockPos pos, Direction dir, FluidState self) {
 		FluidState neighbor = blocks.getFluidState(pos.relative(dir));
 		return neighbor.isEmpty() || !neighbor.getType().isSame(self.getType());
@@ -242,18 +325,6 @@ public final class GhostBlockRenderer {
 		consumer.addVertex(pose, x1, y1, z1).setColor(color).setUv(u1, v1).setLight(FULL_BRIGHT).setNormal(pose, nx, ny, nz);
 		consumer.addVertex(pose, x2, y2, z2).setColor(color).setUv(u2, v2).setLight(FULL_BRIGHT).setNormal(pose, nx, ny, nz);
 		consumer.addVertex(pose, x3, y3, z3).setColor(color).setUv(u3, v3).setLight(FULL_BRIGHT).setNormal(pose, nx, ny, nz);
-	}
-
-	private static MovingBlockRenderState createMovingBlock(ClientLevel level, BlockPos pos, BlockState state) {
-		MovingBlockRenderState moving = new MovingBlockRenderState();
-		moving.randomSeedPos = pos;
-		moving.blockPos = pos;
-		moving.blockState = state;
-		Holder<Biome> biome = level.getBiome(pos);
-		moving.biome = biome;
-		moving.cardinalLighting = level.cardinalLighting();
-		moving.lightEngine = level.getLightEngine();
-		return moving;
 	}
 
 	private static void submitGhostEntity(

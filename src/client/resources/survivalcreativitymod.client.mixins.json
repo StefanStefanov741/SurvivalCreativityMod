@@ -3,11 +3,15 @@
 	"package": "ortero.survivalcreativity.com.client.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
+		"ClientClockManagerMixin",
 		"ClientPacketListenerMixin",
 		"ConnectionMixin",
 		"EntityMixin",
 		"LevelMixin",
-		"MultiPlayerGameModeMixin"
+		"MinecraftMixin",
+		"MinecraftServerMixin",
+		"MultiPlayerGameModeMixin",
+		"ServerLevelMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
