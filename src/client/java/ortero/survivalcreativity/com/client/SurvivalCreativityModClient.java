@@ -13,6 +13,7 @@ import net.minecraft.network.chat.Component;
 import ortero.survivalcreativity.com.client.gui.ImaginationControlsScreen;
 import ortero.survivalcreativity.com.client.imagination.ImaginationInteractions;
 import ortero.survivalcreativity.com.client.imagination.ImaginationManager;
+import ortero.survivalcreativity.com.client.imagination.ImaginationShare;
 import ortero.survivalcreativity.com.client.render.GhostBlockRenderer;
 
 public class SurvivalCreativityModClient implements ClientModInitializer {
@@ -20,6 +21,7 @@ public class SurvivalCreativityModClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		ModKeybinds.register();
 		ImaginationInteractions.register();
+		ImaginationShare.registerClient();
 		GhostBlockRenderer.register();
 
 		ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
@@ -37,6 +39,7 @@ public class SurvivalCreativityModClient implements ClientModInitializer {
 
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
 			ImaginationManager.INSTANCE.abortSessionForDisconnect(client);
+			ImaginationShare.clearPending();
 		});
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
 			client.execute(() -> ImaginationManager.INSTANCE.applyPendingRecovery(client));

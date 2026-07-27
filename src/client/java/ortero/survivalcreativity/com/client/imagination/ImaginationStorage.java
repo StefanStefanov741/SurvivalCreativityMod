@@ -9,13 +9,16 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.storage.LevelResource;
 
 import ortero.survivalcreativity.com.SurvivalCreativityMod;
 
@@ -27,13 +30,39 @@ public final class ImaginationStorage {
 		return client.gameDirectory.toPath().resolve(SurvivalCreativityMod.MOD_ID).resolve("imaginations");
 	}
 
+	/**
+	 * Stable folder key for the current world/server.
+	 * Singleplayer uses the save folder name; multiplayer uses the server address.
+	 */
 	public static String worldKey(Minecraft client) {
-		if (client.getSingleplayerServer() != null) {
-			return sanitize(client.getSingleplayerServer().getWorldData().getLevelName());
+		MinecraftServer integrated = client.getSingleplayerServer();
+		if (integrated != null) {
+			Path worldRoot = integrated.getWorldPath(LevelResource.ROOT);
+			Path folder = worldRoot.getFileName();
+			if (folder != null && !folder.toString().isBlank()) {
+				return sanitize(folder.toString());
+			}
+			return sanitize(integrated.getWorldData().getLevelName());
+		}
+		ServerData server = client.getCurrentServer();
+		if (server != null && server.ip != null && !server.ip.isBlank()) {
+			return sanitize(server.ip);
+		}
+		return "unknown";
+	}
+
+	/** Human-readable label shown in the imaginations menu. */
+	public static String worldLabel(Minecraft client) {
+		MinecraftServer integrated = client.getSingleplayerServer();
+		if (integrated != null) {
+			return integrated.getWorldData().getLevelName();
 		}
 		ServerData server = client.getCurrentServer();
 		if (server != null) {
-			return sanitize(server.ip);
+			if (server.name != null && !server.name.isBlank()) {
+				return server.name + " (" + server.ip + ")";
+			}
+			return server.ip != null ? server.ip : "unknown";
 		}
 		return "unknown";
 	}
@@ -48,9 +77,13 @@ public final class ImaginationStorage {
 		if (!Files.isDirectory(dir)) {
 			return result;
 		}
-		try (var stream = Files.list(dir)) {
-			stream.filter(path -> path.getFileName().toString().endsWith(".nbt"))
-				.forEach(path -> read(path, level).ifPresent(result::add));
+		try (Stream<Path> stream = Files.list(dir)) {
+			stream.filter(path -> {
+				String name = path.getFileName().toString();
+				return name.endsWith(".nbt")
+					&& !name.equals("active_session.nbt")
+					&& !name.equals("pending_world_revert.nbt");
+			}).forEach(path -> read(path, level).ifPresent(result::add));
 		} catch (IOException e) {
 			SurvivalCreativityMod.LOGGER.error("Failed to list imaginations", e);
 		}

@@ -14,7 +14,11 @@ public class SaveImaginationScreen extends Screen {
 	private EditBox nameBox;
 
 	public SaveImaginationScreen(String initialName, Consumer<String> onConfirm) {
-		super(Component.translatable("screen.survivalcreativitymod.save"));
+		this(initialName, onConfirm, Component.translatable("screen.survivalcreativitymod.save"));
+	}
+
+	public SaveImaginationScreen(String initialName, Consumer<String> onConfirm, Component title) {
+		super(title);
 		this.initialName = initialName;
 		this.onConfirm = onConfirm;
 	}
