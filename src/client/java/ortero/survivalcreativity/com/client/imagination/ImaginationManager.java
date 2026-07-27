@@ -855,11 +855,31 @@ public final class ImaginationManager {
 		}
 		preview = imagination;
 		suppressedPreview.clear();
+		seedSatisfiedPreview(client.level);
 		rebuildGhostEntities(client.level);
 		mode = ImaginationMode.PREVIEWING;
 		client.gui.setScreen(null);
 		client.player.sendOverlayMessage(
 			Component.translatable("message.survivalcreativitymod.preview_start", imagination.name()));
+	}
+
+	/** Hide hologram markers for work already done in the live world. */
+	private void seedSatisfiedPreview(ClientLevel level) {
+		if (preview == null || level == null) {
+			return;
+		}
+		for (var entry : preview.changes().entrySet()) {
+			BlockPos pos = entry.getKey();
+			BlockChange change = entry.getValue();
+			BlockState real = level.getBlockState(pos);
+			if (change.placement()) {
+				if (real.equals(change.imaginedState())) {
+					suppressedPreview.add(pos.immutable());
+				}
+			} else if (real.isAir()) {
+				suppressedPreview.add(pos.immutable());
+			}
+		}
 	}
 
 	public void clearPreview(Minecraft client, boolean notify) {

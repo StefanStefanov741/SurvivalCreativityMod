@@ -40,6 +40,11 @@ final class HologramBlockGetter implements BlockAndTintGetter {
 		}
 		BlockChange change = imagination.get(pos);
 		if (change != null && change.placement()) {
+			BlockState real = level.getBlockState(pos);
+			// Already built — treat as empty for hologram meshing so fluids/faces don't glow through.
+			if (real.equals(change.imaginedState())) {
+				return Blocks.AIR.defaultBlockState();
+			}
 			return ImaginationFluids.asStill(change.imaginedState());
 		}
 		return Blocks.AIR.defaultBlockState();

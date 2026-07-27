@@ -111,13 +111,21 @@ public final class GhostBlockRenderer {
 				}
 
 				BlockChange change = entry.getValue();
+				BlockState real = level.getBlockState(pos);
+				if (isChangeSatisfied(change, real)) {
+					continue;
+				}
 				if (change.placement()) {
-					submitGhostPlacement(client, collector, poseStack, level, hologramBlocks, camera, pos, change.imaginedState());
-				} else {
-					BlockState real = level.getBlockState(pos);
-					if (!real.isAir()) {
+					// Preexisting original still there → red break cue (hologram is hidden inside it).
+					// After it is broken, show the placement ghost. A different block the player
+					// placed later is not treated as the original, so it won't glow red.
+					if (isObstructedByOriginal(change, real)) {
 						submitBreakMarker(collector, poseStack, camera, pos, real);
+					} else {
+						submitGhostPlacement(client, collector, poseStack, level, hologramBlocks, overlay, manager, camera, pos, change.imaginedState());
 					}
+				} else {
+					submitBreakMarker(collector, poseStack, camera, pos, real);
 				}
 			}
 
@@ -128,12 +136,37 @@ public final class GhostBlockRenderer {
 		});
 	}
 
+	/** Placement done when the live block matches; break done when the spot is empty. */
+	private static boolean isChangeSatisfied(BlockChange change, BlockState real) {
+		if (change.placement()) {
+			return real.equals(change.imaginedState());
+		}
+		return real.isAir();
+	}
+
+	/**
+	 * True when the live block is still the hologram's recorded original (and that original
+	 * isn't already the desired placement). Only that preexisting block gets the red cue.
+	 */
+	private static boolean isObstructedByOriginal(BlockChange change, BlockState real) {
+		BlockState original = change.originalState();
+		if (original.isAir() || real.isAir()) {
+			return false;
+		}
+		if (real.equals(change.imaginedState())) {
+			return false;
+		}
+		return real.equals(original);
+	}
+
 	private static void submitGhostPlacement(
 		Minecraft client,
 		SubmitNodeCollector collector,
 		PoseStack poseStack,
 		ClientLevel level,
 		HologramBlockGetter hologramBlocks,
+		Imagination overlay,
+		ImaginationManager manager,
 		Vec3 camera,
 		BlockPos pos,
 		BlockState state
@@ -146,7 +179,7 @@ public final class GhostBlockRenderer {
 
 		VoxelShape shape = state.getShape(level, pos, CollisionContext.empty());
 		if (!state.isAir() && (fluid.isEmpty() || !shape.isEmpty())) {
-			submitGhostSolid(client, collector, poseStack, level, camera, pos, state);
+			submitGhostSolid(client, collector, poseStack, level, overlay, manager, camera, pos, state);
 		}
 	}
 
@@ -155,6 +188,8 @@ public final class GhostBlockRenderer {
 		SubmitNodeCollector collector,
 		PoseStack poseStack,
 		ClientLevel level,
+		Imagination overlay,
+		ImaginationManager manager,
 		Vec3 camera,
 		BlockPos pos,
 		BlockState state
@@ -181,6 +216,9 @@ public final class GhostBlockRenderer {
 			instance.setOverlayCoords(OverlayTexture.NO_OVERLAY);
 			for (BlockStateModelPart part : parts) {
 				for (Direction direction : Direction.values()) {
+					if (shouldCullGhostFace(level, overlay, manager, pos.relative(direction))) {
+						continue;
+					}
 					for (BakedQuad quad : part.getQuads(direction)) {
 						putGhostQuad(pose, consumer, instance, quad, tintLayers);
 					}
@@ -196,6 +234,26 @@ public final class GhostBlockRenderer {
 			collector.submitShapeOutline(poseStack, shape, RenderTypes.linesTranslucent(), ghostOutline(), 1.5f, false);
 		}
 		poseStack.popPose();
+	}
+
+	/**
+	 * Hide ghost faces that sit against already-built / solid neighbors so completed
+	 * hologram parts don't keep a translucent glow on their surface.
+	 */
+	private static boolean shouldCullGhostFace(
+		ClientLevel level,
+		Imagination overlay,
+		ImaginationManager manager,
+		BlockPos neighbor
+	) {
+		BlockState neighborReal = level.getBlockState(neighbor);
+		if (manager.isSuppressed(neighbor) || (overlay.get(neighbor) != null
+			&& overlay.get(neighbor).placement()
+			&& isChangeSatisfied(overlay.get(neighbor), neighborReal))) {
+			return !neighborReal.isAir();
+		}
+		// Any solid live block occludes this face (finished build or world terrain).
+		return !neighborReal.isAir();
 	}
 
 	private static void putGhostQuad(
@@ -384,8 +442,47 @@ public final class GhostBlockRenderer {
 		poseStack.translate(pos.getX() - camera.x, pos.getY() - camera.y, pos.getZ() - camera.z);
 		VoxelShape shape = state.getShape(Minecraft.getInstance().level, pos, CollisionContext.empty());
 		if (!shape.isEmpty()) {
+			// Soft red wash over the real block + strong outline so it's obvious to break.
 			collector.submitShapeOutline(poseStack, shape, RenderTypes.linesTranslucent(), breakOutline(), 2.5f, false);
+			int wash = ARGB.color(Math.min(120, HologramSettings.opacityByte()), 255, 64, 64);
+			collector.submitCustomGeometry(poseStack, RenderTypes.translucentMovingBlock(), (pose, consumer) -> {
+				fillShapeWash(pose, consumer, shape, wash);
+			});
 		}
 		poseStack.popPose();
+	}
+
+	private static void fillShapeWash(PoseStack.Pose pose, VertexConsumer consumer, VoxelShape shape, int color) {
+		shape.forAllBoxes((x0, y0, z0, x1, y1, z1) -> {
+			float fx0 = (float) x0;
+			float fy0 = (float) y0;
+			float fz0 = (float) z0;
+			float fx1 = (float) x1;
+			float fy1 = (float) y1;
+			float fz1 = (float) z1;
+			// Six faces of the AABB
+			quadFlat(pose, consumer, fx0, fy1, fz0, fx1, fy1, fz0, fx1, fy1, fz1, fx0, fy1, fz1, color, 0, 1, 0);
+			quadFlat(pose, consumer, fx0, fy0, fz1, fx1, fy0, fz1, fx1, fy0, fz0, fx0, fy0, fz0, color, 0, -1, 0);
+			quadFlat(pose, consumer, fx0, fy1, fz0, fx0, fy1, fz1, fx0, fy0, fz1, fx0, fy0, fz0, color, -1, 0, 0);
+			quadFlat(pose, consumer, fx1, fy1, fz1, fx1, fy1, fz0, fx1, fy0, fz0, fx1, fy0, fz1, color, 1, 0, 0);
+			quadFlat(pose, consumer, fx0, fy1, fz1, fx1, fy1, fz1, fx1, fy0, fz1, fx0, fy0, fz1, color, 0, 0, 1);
+			quadFlat(pose, consumer, fx1, fy1, fz0, fx0, fy1, fz0, fx0, fy0, fz0, fx1, fy0, fz0, color, 0, 0, -1);
+		});
+	}
+
+	private static void quadFlat(
+		PoseStack.Pose pose,
+		VertexConsumer consumer,
+		float x0, float y0, float z0,
+		float x1, float y1, float z1,
+		float x2, float y2, float z2,
+		float x3, float y3, float z3,
+		int color,
+		float nx, float ny, float nz
+	) {
+		consumer.addVertex(pose, x0, y0, z0).setColor(color).setUv(0, 0).setLight(FULL_BRIGHT).setNormal(pose, nx, ny, nz);
+		consumer.addVertex(pose, x1, y1, z1).setColor(color).setUv(1, 0).setLight(FULL_BRIGHT).setNormal(pose, nx, ny, nz);
+		consumer.addVertex(pose, x2, y2, z2).setColor(color).setUv(1, 1).setLight(FULL_BRIGHT).setNormal(pose, nx, ny, nz);
+		consumer.addVertex(pose, x3, y3, z3).setColor(color).setUv(0, 1).setLight(FULL_BRIGHT).setNormal(pose, nx, ny, nz);
 	}
 }
