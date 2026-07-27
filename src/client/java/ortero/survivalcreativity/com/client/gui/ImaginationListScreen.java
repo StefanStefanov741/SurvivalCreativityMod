@@ -6,11 +6,14 @@ import java.util.List;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.Mth;
 
 import ortero.survivalcreativity.com.SurvivalCreativityMod;
+import ortero.survivalcreativity.com.client.imagination.HologramSettings;
 import ortero.survivalcreativity.com.client.imagination.Imagination;
 import ortero.survivalcreativity.com.client.imagination.ImaginationManager;
 import ortero.survivalcreativity.com.client.imagination.ImaginationShare;
@@ -31,7 +34,7 @@ public class ImaginationListScreen extends Screen {
 	protected void init() {
 		clearWidgets();
 		int startY = 52;
-		int visible = Math.max(1, (height - 115) / 24);
+		int visible = Math.max(1, (height - 140) / 24);
 		int end = Math.min(imaginations.size(), scroll + visible);
 
 		for (int i = scroll; i < end; i++) {
@@ -80,8 +83,42 @@ public class ImaginationListScreen extends Screen {
 			}).bounds(width / 2 - 240, startY + 24, 20, 20).build());
 		}
 
+		double sliderValue = (HologramSettings.opacityPercent() - HologramSettings.MIN_OPACITY_PERCENT)
+			/ (double) (HologramSettings.MAX_OPACITY_PERCENT - HologramSettings.MIN_OPACITY_PERCENT);
+		addRenderableWidget(new AbstractSliderButton(
+			width / 2 - 100,
+			height - 62,
+			200,
+			20,
+			opacityMessage(),
+			sliderValue
+		) {
+			@Override
+			protected void updateMessage() {
+				setMessage(opacityMessage());
+			}
+
+			@Override
+			protected void applyValue() {
+				int percent = HologramSettings.MIN_OPACITY_PERCENT
+					+ (int) Math.round(value * (HologramSettings.MAX_OPACITY_PERCENT - HologramSettings.MIN_OPACITY_PERCENT));
+				HologramSettings.setOpacityPercent(Mth.clamp(
+					percent,
+					HologramSettings.MIN_OPACITY_PERCENT,
+					HologramSettings.MAX_OPACITY_PERCENT
+				));
+			}
+		});
+
 		addRenderableWidget(Button.builder(Component.translatable("gui.done"), button -> onClose())
 			.bounds(width / 2 - 50, height - 36, 100, 20).build());
+	}
+
+	private static Component opacityMessage() {
+		return Component.translatable(
+			"screen.survivalcreativitymod.hologram_opacity",
+			HologramSettings.opacityPercent()
+		);
 	}
 
 	@Override

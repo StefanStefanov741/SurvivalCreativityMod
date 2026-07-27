@@ -37,6 +37,7 @@ import java.util.List;
 
 import ortero.survivalcreativity.com.SurvivalCreativityMod;
 import ortero.survivalcreativity.com.client.imagination.BlockChange;
+import ortero.survivalcreativity.com.client.imagination.HologramSettings;
 import ortero.survivalcreativity.com.client.imagination.Imagination;
 import ortero.survivalcreativity.com.client.imagination.ImaginationFluids;
 import ortero.survivalcreativity.com.client.imagination.ImaginationManager;
@@ -46,18 +47,33 @@ import ortero.survivalcreativity.com.client.imagination.ImaginationManager;
  */
 public final class GhostBlockRenderer {
 	private static final Logger LOGGER = SurvivalCreativityMod.LOGGER;
-	/** ~60% opaque ghost blocks. */
-	private static final int HOLOGRAM_TINT = 0x99FFFFFF;
-	private static final int GHOST_OUTLINE = 0x9960C8FF;
-	private static final int BREAK_OUTLINE = 0xB3FF5555;
-	private static final int ENTITY_GHOST_OUTLINE = 0x9960C8FF;
-	private static final int ENTITY_BREAK_OUTLINE = 0xB3FF5555;
+	private static final int GHOST_RGB = 0x60C8FF;
+	private static final int BREAK_RGB = 0xFF5555;
 	private static final int FULL_BRIGHT = 0xF000F0;
-	private static final int FLUID_ALPHA = 153;
 	private static final int[] NO_TINT_LAYERS = new int[0];
 	private static final double RENDER_DISTANCE_SQ = 96.0 * 96.0;
 
 	private GhostBlockRenderer() {
+	}
+
+	private static int hologramTint() {
+		return ARGB.color(HologramSettings.opacityByte(), 255, 255, 255);
+	}
+
+	private static int ghostOutline() {
+		return colorWithOpacity(GHOST_RGB);
+	}
+
+	private static int breakOutline() {
+		return colorWithOpacity(BREAK_RGB);
+	}
+
+	private static int colorWithOpacity(int rgb) {
+		return ARGB.color(HologramSettings.opacityByte(), (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+	}
+
+	private static int fluidAlpha() {
+		return HologramSettings.opacityByte();
 	}
 
 	public static void register() {
@@ -177,7 +193,7 @@ public final class GhostBlockRenderer {
 
 		VoxelShape shape = state.getShape(level, pos, CollisionContext.empty());
 		if (!shape.isEmpty()) {
-			collector.submitShapeOutline(poseStack, shape, RenderTypes.linesTranslucent(), GHOST_OUTLINE, 1.5f, false);
+			collector.submitShapeOutline(poseStack, shape, RenderTypes.linesTranslucent(), ghostOutline(), 1.5f, false);
 		}
 		poseStack.popPose();
 	}
@@ -190,9 +206,9 @@ public final class GhostBlockRenderer {
 		int[] tintLayers
 	) {
 		int tintIndex = quad.materialInfo().tintIndex();
-		int color = HOLOGRAM_TINT;
+		int color = hologramTint();
 		if (tintIndex != -1 && tintIndex < tintLayers.length) {
-			color = ARGB.multiply(HOLOGRAM_TINT, tintLayers[tintIndex]);
+			color = ARGB.multiply(hologramTint(), tintLayers[tintIndex]);
 		}
 		instance.setColor(color);
 		consumer.putBakedQuad(pose, quad, instance);
@@ -262,24 +278,25 @@ public final class GhostBlockRenderer {
 		poseStack.translate(pos.getX() - camera.x, pos.getY() - camera.y, pos.getZ() - camera.z);
 
 		int fr = r, fg = g, fb = b;
+		int fa = fluidAlpha();
 		collector.submitCustomGeometry(poseStack, RenderTypes.translucentMovingBlock(), (pose, consumer) -> {
 			if (up) {
-				quad(pose, consumer, 0, h, 0, 1, h, 0, 1, h, 1, 0, h, 1, u0, v0, u1, v0, u1, v1, u0, v1, fr, fg, fb, FLUID_ALPHA, 0, 1, 0);
+				quad(pose, consumer, 0, h, 0, 1, h, 0, 1, h, 1, 0, h, 1, u0, v0, u1, v0, u1, v1, u0, v1, fr, fg, fb, fa, 0, 1, 0);
 			}
 			if (down) {
-				quad(pose, consumer, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, u0, v1, u1, v1, u1, v0, u0, v0, fr, fg, fb, FLUID_ALPHA, 0, -1, 0);
+				quad(pose, consumer, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, u0, v1, u1, v1, u1, v0, u0, v0, fr, fg, fb, fa, 0, -1, 0);
 			}
 			if (north) {
-				quad(pose, consumer, 1, h, 0, 0, h, 0, 0, 0, 0, 1, 0, 0, fu0, fv0, fu1, fv0, fu1, fv1, fu0, fv1, fr, fg, fb, FLUID_ALPHA, 0, 0, -1);
+				quad(pose, consumer, 1, h, 0, 0, h, 0, 0, 0, 0, 1, 0, 0, fu0, fv0, fu1, fv0, fu1, fv1, fu0, fv1, fr, fg, fb, fa, 0, 0, -1);
 			}
 			if (south) {
-				quad(pose, consumer, 0, h, 1, 1, h, 1, 1, 0, 1, 0, 0, 1, fu0, fv0, fu1, fv0, fu1, fv1, fu0, fv1, fr, fg, fb, FLUID_ALPHA, 0, 0, 1);
+				quad(pose, consumer, 0, h, 1, 1, h, 1, 1, 0, 1, 0, 0, 1, fu0, fv0, fu1, fv0, fu1, fv1, fu0, fv1, fr, fg, fb, fa, 0, 0, 1);
 			}
 			if (west) {
-				quad(pose, consumer, 0, h, 0, 0, h, 1, 0, 0, 1, 0, 0, 0, fu0, fv0, fu1, fv0, fu1, fv1, fu0, fv1, fr, fg, fb, FLUID_ALPHA, -1, 0, 0);
+				quad(pose, consumer, 0, h, 0, 0, h, 1, 0, 0, 1, 0, 0, 0, fu0, fv0, fu1, fv0, fu1, fv1, fu0, fv1, fr, fg, fb, fa, -1, 0, 0);
 			}
 			if (east) {
-				quad(pose, consumer, 1, h, 1, 1, h, 0, 1, 0, 0, 1, 0, 1, fu0, fv0, fu1, fv0, fu1, fv1, fu0, fv1, fr, fg, fb, FLUID_ALPHA, 1, 0, 0);
+				quad(pose, consumer, 1, h, 1, 1, h, 0, 1, 0, 0, 1, 0, 1, fu0, fv0, fu1, fv0, fu1, fv1, fu0, fv1, fr, fg, fb, fa, 1, 0, 0);
 			}
 		});
 
@@ -341,7 +358,7 @@ public final class GhostBlockRenderer {
 		}
 		try {
 			EntityRenderState renderState = dispatcher.extractEntity(entity, 0.0f);
-			renderState.outlineColor = ghost.placement() ? ENTITY_GHOST_OUTLINE : ENTITY_BREAK_OUTLINE;
+			renderState.outlineColor = ghost.placement() ? ghostOutline() : breakOutline();
 			dispatcher.submit(
 				renderState,
 				cameraState,
@@ -367,7 +384,7 @@ public final class GhostBlockRenderer {
 		poseStack.translate(pos.getX() - camera.x, pos.getY() - camera.y, pos.getZ() - camera.z);
 		VoxelShape shape = state.getShape(Minecraft.getInstance().level, pos, CollisionContext.empty());
 		if (!shape.isEmpty()) {
-			collector.submitShapeOutline(poseStack, shape, RenderTypes.linesTranslucent(), BREAK_OUTLINE, 2.5f, false);
+			collector.submitShapeOutline(poseStack, shape, RenderTypes.linesTranslucent(), breakOutline(), 2.5f, false);
 		}
 		poseStack.popPose();
 	}

@@ -16,6 +16,7 @@
 	"screen.survivalcreativitymod.list": "Saved Imaginations",
 	"screen.survivalcreativitymod.list_world": "World: %s",
 	"screen.survivalcreativitymod.list_hint": "Click a name to load hologram — Edit reopens imagination mode",
+	"screen.survivalcreativitymod.hologram_opacity": "Hologram opacity: %s%%",
 	"screen.survivalcreativitymod.load": "Load",
 	"screen.survivalcreativitymod.edit": "Edit",
 	"screen.survivalcreativitymod.share": "Share",
