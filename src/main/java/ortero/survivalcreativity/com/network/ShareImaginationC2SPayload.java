@@ -11,7 +11,7 @@ import net.minecraft.nbt.CompoundTag;
 
 import ortero.survivalcreativity.com.SurvivalCreativityMod;
 
-/** Client → server: share an imagination with everyone else who has the mod. */
+/** Client → server: large imagination share (blueprint NBT). */
 public record ShareImaginationC2SPayload(
 	UUID shareId,
 	String imaginationName,

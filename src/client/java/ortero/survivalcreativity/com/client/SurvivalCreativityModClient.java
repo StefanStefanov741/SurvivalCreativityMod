@@ -64,6 +64,7 @@ public class SurvivalCreativityModClient implements ClientModInitializer {
 			}
 
 			ImaginationManager.INSTANCE.tick(client);
+			ImaginationShare.tick(client);
 			ImaginationInteractions.PendingPreviewPlace.tick(client);
 		});
 	}

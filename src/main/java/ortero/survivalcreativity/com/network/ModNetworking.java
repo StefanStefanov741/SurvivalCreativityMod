@@ -34,7 +34,7 @@ public final class ModNetworking {
 				}
 			}
 			SurvivalCreativityMod.LOGGER.info(
-				"{} shared imagination \"{}\" ({} bytes nbt)",
+				"{} shared large imagination \"{}\" ({} bytes nbt)",
 				sender.getGameProfile().name(),
 				payload.imaginationName(),
 				payload.data().sizeInBytes()

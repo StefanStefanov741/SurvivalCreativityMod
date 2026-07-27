@@ -11,7 +11,7 @@ import net.minecraft.nbt.CompoundTag;
 
 import ortero.survivalcreativity.com.SurvivalCreativityMod;
 
-/** Server → clients: announce a shared imagination and deliver its data. */
+/** Server → clients: large imagination share relay. */
 public record ShareImaginationS2CPayload(
 	UUID shareId,
 	String senderName,
