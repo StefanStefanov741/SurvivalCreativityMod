@@ -281,11 +281,16 @@ public final class ImaginationManager {
 		client.gui.setScreen(null);
 		setCreativeMode(client, true);
 
+		// Must be EDITING before applyImagination so LevelMixin tracks those positions.
+		// Otherwise edit-existing blocks never enter remoteOverlay/sessionDirty and linger on exit.
+		mode = ImaginationMode.EDITING;
 		if (existing && !session.isEmpty()) {
 			applyImaginationToWorld(client, session);
+			if (remoteSession) {
+				seedRemoteDirtyFromImagination(client, session);
+			}
 		}
 
-		mode = ImaginationMode.EDITING;
 		ImaginationWorldControls.INSTANCE.beginSession(client, remoteSession);
 		if (existing) {
 			client.player.sendOverlayMessage(
@@ -378,10 +383,11 @@ public final class ImaginationManager {
 		if (remoteSession && sessionSnapshot != null && client.level instanceof ClientLevel clientLevel) {
 			suppressingRemoteDirty = true;
 			try {
-				sessionSnapshot.restoreRemoteClient(clientLevel, Set.copyOf(remoteOverlay.keySet()));
+				sessionSnapshot.restoreRemoteClient(clientLevel, remoteDirtyPositions());
 			} finally {
 				suppressingRemoteDirty = false;
 				remoteOverlay.clear();
+				sessionDirty.clear();
 			}
 			// Match the AFK body the server still has, so we don't desync / clip on exit
 			if (client.player != null && bodyPosition != null) {
@@ -704,10 +710,11 @@ public final class ImaginationManager {
 			if (sessionSnapshot != null && client.level instanceof ClientLevel clientLevel) {
 				suppressingRemoteDirty = true;
 				try {
-					sessionSnapshot.restoreRemoteClient(clientLevel, Set.copyOf(remoteOverlay.keySet()));
+					sessionSnapshot.restoreRemoteClient(clientLevel, remoteDirtyPositions());
 				} finally {
 					suppressingRemoteDirty = false;
 					remoteOverlay.clear();
+					sessionDirty.clear();
 				}
 			}
 			if (client.player != null && bodyPosition != null) {
@@ -734,6 +741,12 @@ public final class ImaginationManager {
 	/** After disconnect saves finish — drop in-memory quit-guard (pending file remains for join). */
 	public void onDisconnectFinished() {
 		clearQuitGuard();
+	}
+
+	private Set<BlockPos> remoteDirtyPositions() {
+		Set<BlockPos> positions = new HashSet<>(sessionDirty);
+		positions.addAll(remoteOverlay.keySet());
+		return positions;
 	}
 
 	private ItemStack[] copyInventorySnapshot() {
@@ -1007,6 +1020,24 @@ public final class ImaginationManager {
 		}
 		if (client.level != null) {
 			WorldSnapshot.applyImagination(client.level, imagination);
+		}
+	}
+
+	/**
+	 * Ensure every applied hologram position is marked dirty for MP exit restore,
+	 * even if some setBlock calls no-op'd or raced the mixin.
+	 */
+	private void seedRemoteDirtyFromImagination(Minecraft client, Imagination imagination) {
+		if (client.level == null || sessionSnapshot == null) {
+			return;
+		}
+		for (BlockPos pos : imagination.changes().keySet()) {
+			if (!sessionSnapshot.contains(pos)) {
+				continue;
+			}
+			BlockPos key = pos.immutable();
+			sessionDirty.add(key);
+			remoteOverlay.put(key, client.level.getBlockState(key));
 		}
 	}
 

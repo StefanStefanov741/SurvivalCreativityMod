@@ -321,13 +321,28 @@ public final class WorldSnapshot {
 		if (level == null) {
 			return;
 		}
+		// Roll back client block predictions. Place/break packets are blocked in imagination,
+		// so the server never ACKs them — without this, predicted "fake" blocks linger until
+		// the player interacts and a later ACK corrects the mesh.
+		level.handleBlockChangedAck(Integer.MAX_VALUE);
+
 		HolderLookup.Provider registries = level.registryAccess();
+		// UPDATE_CLIENTS | UPDATE_NEIGHBORS | UPDATE_KNOWN_SHAPE (same as ClientLevel.syncBlockState)
+		final int clientRestoreFlags = 19;
 		for (BlockPos pos : dirtyBlocks) {
 			BlockState original = blocks.get(pos.asLong());
 			if (original == null) {
 				continue;
 			}
-			level.setBlock(pos, original, 3);
+			BlockState before = level.getBlockState(pos);
+			if (before.equals(original)) {
+				// Still mark dirty — prediction rollback may have left a stale mesh.
+				level.setBlocksDirty(pos, before, original);
+				level.sendBlockUpdated(pos, before, original, clientRestoreFlags);
+				continue;
+			}
+			level.setBlock(pos, original, clientRestoreFlags);
+			level.setBlocksDirty(pos, before, original);
 			CompoundTag beTag = blockEntities.get(pos.asLong());
 			if (beTag != null) {
 				BlockEntity be = level.getBlockEntity(pos);
@@ -341,6 +356,8 @@ public final class WorldSnapshot {
 						SurvivalCreativityMod.LOGGER.warn("Failed to restore block entity at {}", pos, e);
 					}
 				}
+			} else if (level.getBlockEntity(pos) != null && original.getBlock() != before.getBlock()) {
+				level.removeBlockEntity(pos);
 			}
 		}
 
