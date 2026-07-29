@@ -1,0 +1,28 @@
+{
+	"required": true,
+	"package": "ortero.survivalcreativity.com.client.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"client": [
+		"ChatListenerMixin",
+		"ClientClockManagerMixin",
+		"ClientPacketListenerMixin",
+		"ConnectionMixin",
+		"EntityMixin",
+		"EntityRenderDispatcherMixin",
+		"ItemEntityMixin",
+		"LevelMixin",
+		"LevelRendererMixin",
+		"LivingEntityMixin",
+		"MinecraftMixin",
+		"MinecraftServerMixin",
+		"MultiPlayerGameModeMixin",
+		"ScreenMixin",
+		"ServerLevelMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}

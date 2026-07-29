@@ -1,0 +1,27 @@
+license="MIT"
+
+[[mods]]
+modId="survivalcreativitymod"
+version="${mod_version}"
+displayName="SurvivalCreativityMod"
+description='''
+Plan builds in creative-like imagination mode, then bring them into survival with ghost overlays.
+'''
+authors="Ortero"
+
+[[mixins]]
+config="survivalcreativitymod.common.mixins.json"
+
+[[dependencies.survivalcreativitymod]]
+modId="neoforge"
+type="required"
+versionRange="[${neo_version},)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.survivalcreativitymod]]
+modId="minecraft"
+type="required"
+versionRange="[${minecraft_version},)"
+ordering="NONE"
+side="BOTH"

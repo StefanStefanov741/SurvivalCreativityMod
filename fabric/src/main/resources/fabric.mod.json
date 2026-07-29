@@ -1,0 +1,37 @@
+{
+	"schemaVersion": 1,
+	"id": "survivalcreativitymod",
+	"version": "${version}",
+	"name": "SurvivalCreativityMod",
+	"description": "Plan builds in creative-like imagination mode, then bring them into survival with ghost overlays.",
+	"authors": [
+		"Ortero"
+	],
+	"contact": {
+		"homepage": "https://github.com/StefanStefanov741/SurvivalCreativityMod",
+		"sources": "https://github.com/StefanStefanov741/SurvivalCreativityMod"
+	},
+	"license": "MIT",
+	"icon": "assets/survivalcreativitymod/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"ortero.survivalcreativity.com.fabric.SurvivalCreativityModFabric"
+		],
+		"client": [
+			"ortero.survivalcreativity.com.fabric.client.SurvivalCreativityModFabricClient"
+		]
+	},
+	"mixins": [
+		{
+			"config": "survivalcreativitymod.common.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.19.3",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

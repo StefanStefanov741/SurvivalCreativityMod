@@ -1,0 +1,88 @@
+plugins {
+	id 'java-library'
+	id 'maven-publish'
+	id 'net.neoforged.gradle.userdev' version '7.1.38'
+}
+
+def props = new Properties()
+file("${rootDir}/../gradle.properties").withInputStream { props.load(it) }
+
+version = props['mod_version']
+group = props['maven_group']
+
+base {
+	archivesName = "survivalcreativitymod-neoforge"
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(25)
+
+sourceSets {
+	main {
+		java {
+			srcDirs += ["${rootDir}/../common/src/main/java"]
+		}
+		resources {
+			srcDirs += ["${rootDir}/../common/src/main/resources"]
+			srcDirs += ["${rootDir}/../common/src/client/resources"]
+		}
+	}
+	// NeoForge doesn't use loom's split source sets — merge client into main
+	main {
+		java {
+			srcDirs += ["${rootDir}/../common/src/client/java"]
+			srcDirs += ["src/client/java"]
+		}
+	}
+}
+
+runs {
+	configureEach {
+		systemProperty 'forge.logging.markers', 'REGISTRIES'
+		systemProperty 'forge.logging.console.level', 'debug'
+		workingDirectory project.layout.projectDirectory.dir('run').dir(name)
+		modSource project.sourceSets.main
+	}
+	client {
+		client()
+	}
+	server {
+		server()
+		argument '--nogui'
+	}
+}
+
+dependencies {
+	implementation "net.neoforged:neoforge:${props['neo_version']}"
+}
+
+processResources {
+	def replaceProperties = [
+		minecraft_version     : props['minecraft_version'],
+		minecraft_version_range: props['minecraft_version_range'],
+		neo_version           : props['neo_version'],
+		mod_version           : props['mod_version'],
+	]
+	inputs.properties replaceProperties
+	filesMatching(['META-INF/neoforge.mods.toml']) {
+		expand replaceProperties
+	}
+}
+
+jar {
+	manifest {
+		attributes([
+			"Implementation-Title"  : "SurvivalCreativityMod",
+			"Implementation-Version": version,
+		])
+	}
+}
+
+publishing {
+	publications {
+		create("mavenJava", MavenPublication) {
+			from components.java
+		}
+	}
+	repositories {
+	}
+}
