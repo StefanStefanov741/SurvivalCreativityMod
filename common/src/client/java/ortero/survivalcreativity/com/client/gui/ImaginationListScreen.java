@@ -224,8 +224,9 @@ public class ImaginationListScreen extends Screen {
 		double sliderValue = (HologramSettings.opacityPercent() - HologramSettings.MIN_OPACITY_PERCENT)
 			/ (double) (HologramSettings.MAX_OPACITY_PERCENT - HologramSettings.MIN_OPACITY_PERCENT);
 		int sliderWidth = 180;
+		int rightPadding = 24;
 		addRenderableWidget(new AbstractSliderButton(
-			width - sliderWidth - 8,
+			width - sliderWidth - rightPadding,
 			height - CONTROLS_HEIGHT,
 			sliderWidth,
 			20,
