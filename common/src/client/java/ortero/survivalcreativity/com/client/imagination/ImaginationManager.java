@@ -23,6 +23,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
@@ -731,6 +732,13 @@ public final class ImaginationManager {
 		inventorySnapshot = new ItemStack[0];
 		bodyPosition = null;
 		mode = ImaginationMode.IDLE;
+	}
+
+	public void ensureSessionBlockCaptured(Level level, BlockPos pos) {
+		if (!isEditing() || suppressingRemoteDirty || sessionSnapshot == null || level == null) {
+			return;
+		}
+		sessionSnapshot.ensureCaptured(level, pos);
 	}
 
 	public void onSessionBlockChanged(BlockPos pos, BlockState state) {

@@ -55,16 +55,43 @@ public final class WorldSnapshot {
 	}
 
 	public AABB bounds() {
-		return new AABB(
-			origin.getX() - radius, origin.getY() - radius, origin.getZ() - radius,
-			origin.getX() + radius + 1, origin.getY() + radius + 1, origin.getZ() + radius + 1
-		);
+		int minX = origin.getX() - radius;
+		int minY = origin.getY() - radius;
+		int minZ = origin.getZ() - radius;
+		int maxX = origin.getX() + radius;
+		int maxY = origin.getY() + radius;
+		int maxZ = origin.getZ() + radius;
+		for (long key : blocks.keySet()) {
+			BlockPos pos = BlockPos.of(key);
+			minX = Math.min(minX, pos.getX());
+			minY = Math.min(minY, pos.getY());
+			minZ = Math.min(minZ, pos.getZ());
+			maxX = Math.max(maxX, pos.getX());
+			maxY = Math.max(maxY, pos.getY());
+			maxZ = Math.max(maxZ, pos.getZ());
+		}
+		return new AABB(minX, minY, minZ, maxX + 1, maxY + 1, maxZ + 1);
 	}
 
 	public boolean contains(BlockPos pos) {
-		return Math.abs(pos.getX() - origin.getX()) <= radius
-			&& Math.abs(pos.getY() - origin.getY()) <= radius
-			&& Math.abs(pos.getZ() - origin.getZ()) <= radius;
+		return blocks.containsKey(pos.asLong());
+	}
+
+	/**
+	 * Lazily add a position that was outside the initial cube so builds farther from
+	 * the body still participate in diffs / restore. Call before the block changes.
+	 */
+	public void ensureCaptured(Level level, BlockPos pos) {
+		long key = pos.asLong();
+		if (blocks.containsKey(key)) {
+			return;
+		}
+		HolderLookup.Provider registries = level.registryAccess();
+		blocks.put(key, level.getBlockState(pos));
+		CompoundTag beTag = BlockChange.saveBlockEntity(level.getBlockEntity(pos), registries);
+		if (beTag != null) {
+			blockEntities.put(key, beTag);
+		}
 	}
 
 	public @Nullable BlockState getBlock(BlockPos pos) {

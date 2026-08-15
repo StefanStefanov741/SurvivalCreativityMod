@@ -61,8 +61,8 @@
 	"screen.survivalcreativitymod.cleanup_fires": "Extinguish",
 	"screen.survivalcreativitymod.fire_spread": "Toggle Spread",
 
-	"message.survivalcreativitymod.edit_enter": "Real creative imagination (±4 chunks). Build freely — water, redstone, entities work. K saves a hologram of the diff, I exits and restores the world.",
-	"message.survivalcreativitymod.edit_enter_remote": "Local imagination (±4 chunks). World stays live; builds are client-only. Chat still works. You look AFK on the server. K saves a hologram, I exits and clears local edits.",
+	"message.survivalcreativitymod.edit_enter": "Real creative imagination. Nearby chunks are copied first; builds farther out are still tracked. K saves a hologram of the diff, I exits and restores the world.",
+	"message.survivalcreativitymod.edit_enter_remote": "Local imagination. Nearby chunks are copied first; builds farther out are still tracked. World stays live; builds are client-only. Chat still works. You look AFK on the server. K saves a hologram, I exits and clears local edits.",
 	"message.survivalcreativitymod.edit_existing": "Editing \"%s\" in real creative. K saves over it, I exits and restores the world.",
 	"message.survivalcreativitymod.edit_existing_remote": "Editing \"%s\" locally. K saves over it, I exits and clears local edits.",
 	"message.survivalcreativitymod.edit_exit": "Imagination ended — world restored to how it was.",

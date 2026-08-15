@@ -13,10 +13,25 @@ import ortero.survivalcreativity.com.client.imagination.ImaginationManager;
 
 /**
  * Track every block change during imagination (client + integrated server levels)
- * so disconnect can revert exactly those positions.
+ * so disconnect can revert exactly those positions. Positions outside the initial
+ * snapshot cube are captured lazily before the change lands.
  */
 @Mixin(Level.class)
 public abstract class LevelMixin {
+	@Inject(
+		method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z",
+		at = @At("HEAD")
+	)
+	private void survivalcreativity$captureOutsideSnapshot(
+		BlockPos pos,
+		BlockState state,
+		int flags,
+		int recursionLeft,
+		CallbackInfoReturnable<Boolean> cir
+	) {
+		ImaginationManager.INSTANCE.ensureSessionBlockCaptured((Level) (Object) this, pos);
+	}
+
 	@Inject(
 		method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z",
 		at = @At("RETURN")
