@@ -21,6 +21,8 @@ public final class Imagination {
 	private final long createdAt;
 	private final Map<BlockPos, BlockChange> changes;
 	private final Map<UUID, EntityChange> entityChanges;
+	/** Null = legacy save (no player-action materials tracking). */
+	private @Nullable PlayerMaterials playerMaterials;
 
 	public Imagination(
 		UUID id,
@@ -29,20 +31,39 @@ public final class Imagination {
 		Map<BlockPos, BlockChange> changes,
 		Map<UUID, EntityChange> entityChanges
 	) {
+		this(id, name, createdAt, changes, entityChanges, null);
+	}
+
+	public Imagination(
+		UUID id,
+		String name,
+		long createdAt,
+		Map<BlockPos, BlockChange> changes,
+		Map<UUID, EntityChange> entityChanges,
+		@Nullable PlayerMaterials playerMaterials
+	) {
 		this.id = id;
 		this.name = name;
 		this.createdAt = createdAt;
 		this.changes = new LinkedHashMap<>(changes);
 		this.entityChanges = new LinkedHashMap<>(entityChanges);
+		this.playerMaterials = playerMaterials;
 	}
 
 	public static Imagination create(String name) {
-		return new Imagination(UUID.randomUUID(), name, System.currentTimeMillis(), Map.of(), Map.of());
+		return new Imagination(UUID.randomUUID(), name, System.currentTimeMillis(), Map.of(), Map.of(), null);
 	}
 
 	/** Mutable copy that keeps the same id (for overwrite-on-save when editing). */
 	public Imagination copyForEdit() {
-		return new Imagination(id, name, createdAt, new LinkedHashMap<>(changes), new LinkedHashMap<>(entityChanges));
+		return new Imagination(
+			id,
+			name,
+			createdAt,
+			new LinkedHashMap<>(changes),
+			new LinkedHashMap<>(entityChanges),
+			playerMaterials
+		);
 	}
 
 	public UUID id() {
@@ -67,6 +88,18 @@ public final class Imagination {
 
 	public Map<UUID, EntityChange> entityChanges() {
 		return Collections.unmodifiableMap(entityChanges);
+	}
+
+	public @Nullable PlayerMaterials playerMaterials() {
+		return playerMaterials;
+	}
+
+	public void setPlayerMaterials(@Nullable PlayerMaterials playerMaterials) {
+		this.playerMaterials = playerMaterials;
+	}
+
+	public boolean hasPlayerMaterials() {
+		return playerMaterials != null;
 	}
 
 	public void put(BlockPos pos, BlockChange change) {
@@ -144,6 +177,10 @@ public final class Imagination {
 			entities.add(change.save());
 		}
 		tag.put("entities", entities);
+
+		if (playerMaterials != null) {
+			tag.put("playerMaterials", playerMaterials.save());
+		}
 		return tag;
 	}
 
@@ -173,6 +210,11 @@ public final class Imagination {
 				entityChanges.put(change.uuid(), change);
 			}
 		}
-		return new Imagination(id, name, createdAt, changes, entityChanges);
+
+		PlayerMaterials materials = null;
+		if (tag.contains("playerMaterials")) {
+			materials = PlayerMaterials.load(tag.getCompoundOrEmpty("playerMaterials"));
+		}
+		return new Imagination(id, name, createdAt, changes, entityChanges, materials);
 	}
 }

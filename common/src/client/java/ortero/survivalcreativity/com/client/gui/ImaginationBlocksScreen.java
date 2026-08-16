@@ -37,6 +37,14 @@ public class ImaginationBlocksScreen extends Screen {
 
 	private void buildRows() {
 		rows.clear();
+		if (!summary.supported()) {
+			rows.add(new Row(
+				Component.translatable("screen.survivalcreativitymod.blocks_legacy").getString(),
+				0xFFFFAA55,
+				ItemStack.EMPTY
+			));
+			return;
+		}
 		if (!summary.toPlace().isEmpty()) {
 			rows.add(new Row(Component.translatable("screen.survivalcreativitymod.blocks_place").getString(), 0xFFFFFFFF, ItemStack.EMPTY));
 			for (ImaginationMaterials.Entry entry : summary.toPlace()) {
@@ -67,15 +75,17 @@ public class ImaginationBlocksScreen extends Screen {
 			b -> onClose()
 		).bounds(width / 2 - 160, bottomY, 100, 20).build());
 
-		addRenderableWidget(Button.builder(
-			Component.translatable("screen.survivalcreativitymod.blocks_copy"),
-			b -> copyToClipboard()
-		).bounds(width / 2 - 50, bottomY, 100, 20).build());
+		if (summary.supported()) {
+			addRenderableWidget(Button.builder(
+				Component.translatable("screen.survivalcreativitymod.blocks_copy"),
+				b -> copyToClipboard()
+			).bounds(width / 2 - 50, bottomY, 100, 20).build());
 
-		addRenderableWidget(Button.builder(
-			Component.translatable("screen.survivalcreativitymod.blocks_share"),
-			b -> shareInChat()
-		).bounds(width / 2 + 60, bottomY, 100, 20).build());
+			addRenderableWidget(Button.builder(
+				Component.translatable("screen.survivalcreativitymod.blocks_share"),
+				b -> shareInChat()
+			).bounds(width / 2 + 60, bottomY, 100, 20).build());
+		}
 
 		int visible = Math.max(1, (height - 90) / ROW_HEIGHT);
 		if (rows.size() > visible) {
@@ -121,7 +131,11 @@ public class ImaginationBlocksScreen extends Screen {
 		graphics.centeredText(font, title, width / 2, 12, 0xFFFFFFFF);
 		graphics.centeredText(
 			font,
-			Component.translatable("screen.survivalcreativitymod.blocks_hint"),
+			Component.translatable(
+				summary.supported()
+					? "screen.survivalcreativitymod.blocks_hint"
+					: "screen.survivalcreativitymod.blocks_legacy_hint"
+			),
 			width / 2,
 			28,
 			0xFFA0A0A0
@@ -138,7 +152,12 @@ public class ImaginationBlocksScreen extends Screen {
 				graphics.item(row.icon(), x, y);
 				graphics.text(font, row.text(), x + 20, y + 4, row.color());
 			} else if (!row.text().isEmpty()) {
-				graphics.text(font, row.text(), x, y + 4, row.color());
+				// Wrap legacy message across the content width
+				if (!summary.supported()) {
+					graphics.text(font, row.text(), x, y + 4, row.color());
+				} else {
+					graphics.text(font, row.text(), x, y + 4, row.color());
+				}
 			}
 		}
 	}

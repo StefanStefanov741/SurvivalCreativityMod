@@ -36,6 +36,8 @@
 	"screen.survivalcreativitymod.blocks_place": "Place:",
 	"screen.survivalcreativitymod.blocks_break": "Break:",
 	"screen.survivalcreativitymod.blocks_empty": "No block changes in this hologram.",
+	"screen.survivalcreativitymod.blocks_legacy": "This hologram was built on a different version of the mod, which is why block differences cannot be shown.",
+	"screen.survivalcreativitymod.blocks_legacy_hint": "Re-save this imagination on the current mod version to enable the block list",
 	"screen.survivalcreativitymod.blocks_back": "Back",
 	"screen.survivalcreativitymod.blocks_copy": "Copy",
 	"screen.survivalcreativitymod.blocks_share": "Share",

@@ -1,16 +1,10 @@
 package ortero.survivalcreativity.com.client.imagination;
 
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * Tallies blocks to place (−) and blocks to mine (+) for a hologram, kept separate.
@@ -26,12 +20,19 @@ public final class ImaginationMaterials {
 		}
 	}
 
-	public record Summary(List<Entry> toPlace, List<Entry> toBreak) {
+	public record Summary(List<Entry> toPlace, List<Entry> toBreak, boolean supported) {
+		public static Summary unsupported() {
+			return new Summary(List.of(), List.of(), false);
+		}
+
 		public boolean isEmpty() {
 			return toPlace.isEmpty() && toBreak.isEmpty();
 		}
 
 		public String asClipboardText(String hologramName) {
+			if (!supported) {
+				return hologramName + "\n(block list unavailable — older mod version)";
+			}
 			StringBuilder sb = new StringBuilder();
 			sb.append(hologramName).append('\n');
 			if (!toPlace.isEmpty()) {
@@ -53,6 +54,10 @@ public final class ImaginationMaterials {
 			List<String> messages = new ArrayList<>();
 			String header = "[Imagination] " + hologramName;
 			messages.add(header);
+			if (!supported) {
+				messages.add("(block list unavailable — older mod version)");
+				return messages;
+			}
 			StringBuilder current = new StringBuilder();
 			Runnable flush = () -> {
 				if (!current.isEmpty()) {
@@ -93,39 +98,11 @@ public final class ImaginationMaterials {
 	}
 
 	public static Summary summarize(Imagination imagination) {
-		Map<Block, Integer> place = new LinkedHashMap<>();
-		Map<Block, Integer> brk = new LinkedHashMap<>();
-
-		for (BlockChange change : imagination.changes().values()) {
-			if (change.placement()) {
-				add(place, change.imaginedState());
-				if (!change.originalState().isAir()) {
-					add(brk, change.originalState());
-				}
-			} else if (!change.originalState().isAir()) {
-				add(brk, change.originalState());
-			}
+		PlayerMaterials materials = imagination.playerMaterials();
+		if (materials == null) {
+			return Summary.unsupported();
 		}
-
-		return new Summary(toEntries(place, true), toEntries(brk, false));
-	}
-
-	private static void add(Map<Block, Integer> counts, BlockState state) {
-		Block block = state.getBlock();
-		if (block == Blocks.AIR || block == Blocks.CAVE_AIR || block == Blocks.VOID_AIR) {
-			return;
-		}
-		counts.merge(block, 1, Integer::sum);
-	}
-
-	private static List<Entry> toEntries(Map<Block, Integer> counts, boolean placement) {
-		List<Entry> entries = new ArrayList<>();
-		for (Map.Entry<Block, Integer> entry : counts.entrySet()) {
-			Block block = entry.getKey();
-			ItemStack icon = new ItemStack(block.asItem());
-			entries.add(new Entry(block.getName(), entry.getValue(), placement, icon));
-		}
-		entries.sort(Comparator.comparing(e -> e.name().getString(), String.CASE_INSENSITIVE_ORDER));
-		return entries;
+		Summary summary = materials.toSummary();
+		return new Summary(summary.toPlace(), summary.toBreak(), true);
 	}
 }

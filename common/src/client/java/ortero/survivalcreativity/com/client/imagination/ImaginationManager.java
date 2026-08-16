@@ -57,6 +57,8 @@ public final class ImaginationManager {
 	private final Map<BlockPos, BlockState> remoteOverlay = new HashMap<>();
 	/** Every block touched while editing (SP + MP) — used to revert on disconnect. */
 	private final Set<BlockPos> sessionDirty = new HashSet<>();
+	/** Positions the local player personally placed or broke (for Blocks material list). */
+	private final Set<BlockPos> playerTouchedBlocks = new HashSet<>();
 	/**
 	 * Kept after session clear so {@link #ensureWorldRevertedBeforeSave} can strip
 	 * imagination blocks on the server thread right before disk write.
@@ -221,6 +223,7 @@ public final class ImaginationManager {
 		remoteSession = client.getSingleplayerServer() == null;
 		remoteOverlay.clear();
 		sessionDirty.clear();
+		playerTouchedBlocks.clear();
 		suppressingRemoteDirty = false;
 		working = session;
 		previousGameType = client.gameMode.getPlayerMode();
@@ -341,6 +344,7 @@ public final class ImaginationManager {
 		if (sessionSnapshot == null || working == null || client.level == null) {
 			return null;
 		}
+		Imagination diff;
 		if (!remoteSession) {
 			MinecraftServer server = client.getSingleplayerServer();
 			if (server == null || client.player == null) {
@@ -357,14 +361,19 @@ public final class ImaginationManager {
 					holder[0] = sessionSnapshot.createDiff(serverPlayer.level(), name, id, createdAt);
 				}
 			});
-			return holder[0];
+			diff = holder[0];
+		} else {
+			diff = sessionSnapshot.createDiff(
+				client.level,
+				working.name(),
+				working.id(),
+				working.createdAt()
+			);
 		}
-		return sessionSnapshot.createDiff(
-			client.level,
-			working.name(),
-			working.id(),
-			working.createdAt()
-		);
+		if (diff != null) {
+			diff.setPlayerMaterials(PlayerMaterials.fromTouchedPositions(playerTouchedBlocks, diff));
+		}
+		return diff;
 	}
 
 	public void exitEdit(Minecraft client, boolean saved) {
@@ -727,11 +736,20 @@ public final class ImaginationManager {
 		remoteSession = false;
 		remoteOverlay.clear();
 		sessionDirty.clear();
+		playerTouchedBlocks.clear();
 		suppressingRemoteDirty = false;
 		sendingIdleHeartbeat = false;
 		inventorySnapshot = new ItemStack[0];
 		bodyPosition = null;
 		mode = ImaginationMode.IDLE;
+	}
+
+	/** Record a block the local player just placed or broke while imagining. */
+	public void recordPlayerBlockEdit(BlockPos pos) {
+		if (!isEditing() || pos == null) {
+			return;
+		}
+		playerTouchedBlocks.add(pos.immutable());
 	}
 
 	public void ensureSessionBlockCaptured(Level level, BlockPos pos) {
