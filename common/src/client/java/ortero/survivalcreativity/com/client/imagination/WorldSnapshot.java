@@ -344,6 +344,14 @@ public final class WorldSnapshot {
 		net.minecraft.client.multiplayer.ClientLevel level,
 		java.util.Set<BlockPos> dirtyBlocks
 	) {
+		restoreRemoteClient(level, dirtyBlocks, true);
+	}
+
+	public void restoreRemoteClient(
+		net.minecraft.client.multiplayer.ClientLevel level,
+		java.util.Set<BlockPos> dirtyBlocks,
+		boolean discardClientOnlyEntities
+	) {
 		if (level == null) {
 			return;
 		}
@@ -382,6 +390,9 @@ public final class WorldSnapshot {
 			}
 		}
 
+		if (!discardClientOnlyEntities) {
+			return;
+		}
 		for (Entity entity : List.copyOf(level.getEntities(null, bounds()))) {
 			if (entity instanceof Player) {
 				continue;

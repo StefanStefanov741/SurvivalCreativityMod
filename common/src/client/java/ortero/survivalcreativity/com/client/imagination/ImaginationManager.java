@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.jetbrains.annotations.Nullable;
@@ -56,7 +57,7 @@ public final class ImaginationManager {
 	/** Local block edits during remote sessions — reapplied when the server syncs chunks. */
 	private final Map<BlockPos, BlockState> remoteOverlay = new HashMap<>();
 	/** Every block touched while editing (SP + MP) — used to revert on disconnect. */
-	private final Set<BlockPos> sessionDirty = new HashSet<>();
+	private final Set<BlockPos> sessionDirty = ConcurrentHashMap.newKeySet();
 	/** Positions the local player personally placed or broke (for Blocks material list). */
 	private final Set<BlockPos> playerTouchedBlocks = new HashSet<>();
 	/**
@@ -398,7 +399,16 @@ public final class ImaginationManager {
 				client.player.refreshChatAbilities();
 			}
 		} else if (sessionSnapshot != null) {
+			Set<BlockPos> clientPositions = clientRestorePositions();
 			sessionSnapshot.restore(client);
+			if (client.level instanceof ClientLevel clientLevel) {
+				suppressingRemoteDirty = true;
+				try {
+					sessionSnapshot.restoreRemoteClient(clientLevel, clientPositions, false);
+				} finally {
+					suppressingRemoteDirty = false;
+				}
+			}
 			restoreBody(client);
 		}
 
@@ -717,8 +727,21 @@ public final class ImaginationManager {
 	}
 
 	private Set<BlockPos> remoteDirtyPositions() {
+		return clientRestorePositions();
+	}
+
+	/**
+	 * Positions that must be forced back on the client after imagination ends.
+	 * Server restore packets often leave the local chunk mesh showing old blocks
+	 * until the player interacts — especially after editing an existing hologram.
+	 */
+	private Set<BlockPos> clientRestorePositions() {
 		Set<BlockPos> positions = new HashSet<>(sessionDirty);
 		positions.addAll(remoteOverlay.keySet());
+		positions.addAll(playerTouchedBlocks);
+		if (working != null) {
+			positions.addAll(working.changes().keySet());
+		}
 		return positions;
 	}
 
@@ -1018,7 +1041,7 @@ public final class ImaginationManager {
 				return;
 			}
 			UUID uuid = client.player.getUUID();
-			server.execute(() -> {
+			server.executeBlocking(() -> {
 				var serverPlayer = server.getPlayerList().getPlayer(uuid);
 				if (serverPlayer == null) {
 					return;
