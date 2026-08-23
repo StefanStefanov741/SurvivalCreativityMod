@@ -225,6 +225,9 @@ public final class ImaginationManager {
 		remoteOverlay.clear();
 		sessionDirty.clear();
 		playerTouchedBlocks.clear();
+		if (existing && session.playerEditedPositions() != null) {
+			playerTouchedBlocks.addAll(session.playerEditedPositions());
+		}
 		suppressingRemoteDirty = false;
 		working = session;
 		previousGameType = client.gameMode.getPlayerMode();
@@ -372,9 +375,28 @@ public final class ImaginationManager {
 			);
 		}
 		if (diff != null) {
-			diff.setPlayerMaterials(PlayerMaterials.fromTouchedPositions(playerTouchedBlocks, diff));
+			attachPlayerMaterials(diff);
 		}
 		return diff;
+	}
+
+	/**
+	 * Rebuild materials from every position the player has ever edited for this
+	 * imagination (prior saves + this session). Older 1.0.2/1.0.3 saves without
+	 * stored positions fall back to merging previous tallies with this session
+	 * and keep positions unset so later re-edits do not drop the old tallies.
+	 */
+	private void attachPlayerMaterials(Imagination diff) {
+		Set<BlockPos> edited = Set.copyOf(playerTouchedBlocks);
+		PlayerMaterials fromTouches = PlayerMaterials.fromTouchedPositions(edited, diff);
+		boolean hadStoredPositions = working != null && working.playerEditedPositions() != null;
+		if (!hadStoredPositions && working != null && working.playerMaterials() != null) {
+			diff.setPlayerMaterials(PlayerMaterials.merge(working.playerMaterials(), fromTouches));
+			diff.setPlayerEditedPositions(null);
+			return;
+		}
+		diff.setPlayerMaterials(fromTouches);
+		diff.setPlayerEditedPositions(edited);
 	}
 
 	public void exitEdit(Minecraft client, boolean saved) {

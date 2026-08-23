@@ -2,7 +2,9 @@ package ortero.survivalcreativity.com.client.imagination;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.jetbrains.annotations.Nullable;
@@ -23,6 +25,11 @@ public final class Imagination {
 	private final Map<UUID, EntityChange> entityChanges;
 	/** Null = legacy save (no player-action materials tracking). */
 	private @Nullable PlayerMaterials playerMaterials;
+	/**
+	 * Positions the player personally edited. Null = unknown (older 1.0.2/1.0.3 saves
+	 * that only stored material tallies). Empty set = tracked, no edits yet.
+	 */
+	private @Nullable Set<BlockPos> playerEditedPositions;
 
 	public Imagination(
 		UUID id,
@@ -31,7 +38,7 @@ public final class Imagination {
 		Map<BlockPos, BlockChange> changes,
 		Map<UUID, EntityChange> entityChanges
 	) {
-		this(id, name, createdAt, changes, entityChanges, null);
+		this(id, name, createdAt, changes, entityChanges, null, null);
 	}
 
 	public Imagination(
@@ -42,16 +49,39 @@ public final class Imagination {
 		Map<UUID, EntityChange> entityChanges,
 		@Nullable PlayerMaterials playerMaterials
 	) {
+		this(id, name, createdAt, changes, entityChanges, playerMaterials, null);
+	}
+
+	public Imagination(
+		UUID id,
+		String name,
+		long createdAt,
+		Map<BlockPos, BlockChange> changes,
+		Map<UUID, EntityChange> entityChanges,
+		@Nullable PlayerMaterials playerMaterials,
+		@Nullable Set<BlockPos> playerEditedPositions
+	) {
 		this.id = id;
 		this.name = name;
 		this.createdAt = createdAt;
 		this.changes = new LinkedHashMap<>(changes);
 		this.entityChanges = new LinkedHashMap<>(entityChanges);
 		this.playerMaterials = playerMaterials;
+		this.playerEditedPositions = playerEditedPositions == null
+			? null
+			: new LinkedHashSet<>(playerEditedPositions);
 	}
 
 	public static Imagination create(String name) {
-		return new Imagination(UUID.randomUUID(), name, System.currentTimeMillis(), Map.of(), Map.of(), null);
+		return new Imagination(
+			UUID.randomUUID(),
+			name,
+			System.currentTimeMillis(),
+			Map.of(),
+			Map.of(),
+			null,
+			new LinkedHashSet<>()
+		);
 	}
 
 	/** Mutable copy that keeps the same id (for overwrite-on-save when editing). */
@@ -62,7 +92,8 @@ public final class Imagination {
 			createdAt,
 			new LinkedHashMap<>(changes),
 			new LinkedHashMap<>(entityChanges),
-			playerMaterials
+			playerMaterials,
+			playerEditedPositions == null ? null : new LinkedHashSet<>(playerEditedPositions)
 		);
 	}
 
@@ -100,6 +131,14 @@ public final class Imagination {
 
 	public boolean hasPlayerMaterials() {
 		return playerMaterials != null;
+	}
+
+	public @Nullable Set<BlockPos> playerEditedPositions() {
+		return playerEditedPositions == null ? null : Collections.unmodifiableSet(playerEditedPositions);
+	}
+
+	public void setPlayerEditedPositions(@Nullable Set<BlockPos> positions) {
+		this.playerEditedPositions = positions == null ? null : new LinkedHashSet<>(positions);
 	}
 
 	public void put(BlockPos pos, BlockChange change) {
@@ -181,6 +220,17 @@ public final class Imagination {
 		if (playerMaterials != null) {
 			tag.put("playerMaterials", playerMaterials.save());
 		}
+		if (playerEditedPositions != null) {
+			ListTag edited = new ListTag();
+			for (BlockPos pos : playerEditedPositions) {
+				CompoundTag p = new CompoundTag();
+				p.putInt("x", pos.getX());
+				p.putInt("y", pos.getY());
+				p.putInt("z", pos.getZ());
+				edited.add(p);
+			}
+			tag.put("playerEdited", edited);
+		}
 		return tag;
 	}
 
@@ -215,6 +265,21 @@ public final class Imagination {
 		if (tag.contains("playerMaterials")) {
 			materials = PlayerMaterials.load(tag.getCompoundOrEmpty("playerMaterials"));
 		}
-		return new Imagination(id, name, createdAt, changes, entityChanges, materials);
+
+		Set<BlockPos> edited = null;
+		if (tag.contains("playerEdited")) {
+			edited = new LinkedHashSet<>();
+			ListTag editedList = tag.getListOrEmpty("playerEdited");
+			for (int i = 0; i < editedList.size(); i++) {
+				CompoundTag p = editedList.getCompoundOrEmpty(i);
+				edited.add(new BlockPos(
+					p.getIntOr("x", 0),
+					p.getIntOr("y", 0),
+					p.getIntOr("z", 0)
+				));
+			}
+		}
+
+		return new Imagination(id, name, createdAt, changes, entityChanges, materials, edited);
 	}
 }

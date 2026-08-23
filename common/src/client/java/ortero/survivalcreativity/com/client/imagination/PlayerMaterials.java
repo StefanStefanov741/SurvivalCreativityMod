@@ -66,6 +66,21 @@ public final class PlayerMaterials {
 		return placed.isEmpty() && broken.isEmpty();
 	}
 
+	/** Additively combine tallies (used when re-editing saves that lack stored positions). */
+	public static PlayerMaterials merge(PlayerMaterials base, PlayerMaterials extra) {
+		if (base == null) {
+			return extra == null ? empty() : extra;
+		}
+		if (extra == null || extra.isEmpty()) {
+			return base;
+		}
+		Map<String, Integer> place = new LinkedHashMap<>(base.placed);
+		Map<String, Integer> brk = new LinkedHashMap<>(base.broken);
+		extra.placed.forEach((id, n) -> place.merge(id, n, Integer::sum));
+		extra.broken.forEach((id, n) -> brk.merge(id, n, Integer::sum));
+		return new PlayerMaterials(place, brk);
+	}
+
 	public ImaginationMaterials.Summary toSummary() {
 		return new ImaginationMaterials.Summary(toEntries(placed, true), toEntries(broken, false), true);
 	}
