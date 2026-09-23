@@ -1,6 +1,5 @@
 package ortero.survivalcreativity.com.neoforge.client;
 
-import org.lwjgl.glfw.GLFW;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
@@ -20,26 +19,26 @@ public final class ModKeybindsNeoForge {
 	public static void register(RegisterKeyMappingsEvent event) {
 		TOGGLE_EDIT = new KeyMapping(
 			"key.survivalcreativitymod.toggle_edit",
-			InputConstants.Type.KEYSYM,
-			GLFW.GLFW_KEY_I,
+			InputConstants.Type.KEYBOARD,
+			InputConstants.KEY_I,
 			CATEGORY
 		);
 		SAVE = new KeyMapping(
 			"key.survivalcreativitymod.save",
-			InputConstants.Type.KEYSYM,
-			GLFW.GLFW_KEY_K,
+			InputConstants.Type.KEYBOARD,
+			InputConstants.KEY_K,
 			CATEGORY
 		);
 		OPEN_MENU = new KeyMapping(
 			"key.survivalcreativitymod.open_menu",
-			InputConstants.Type.KEYSYM,
-			GLFW.GLFW_KEY_H,
+			InputConstants.Type.KEYBOARD,
+			InputConstants.KEY_H,
 			CATEGORY
 		);
 		HIDE_PREVIEW = new KeyMapping(
 			"key.survivalcreativitymod.hide_preview",
-			InputConstants.Type.KEYSYM,
-			GLFW.GLFW_KEY_U,
+			InputConstants.Type.KEYBOARD,
+			InputConstants.KEY_U,
 			CATEGORY
 		);
 		event.register(TOGGLE_EDIT);

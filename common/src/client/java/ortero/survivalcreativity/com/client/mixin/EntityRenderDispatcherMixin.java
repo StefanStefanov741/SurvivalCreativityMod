@@ -20,6 +20,7 @@ public abstract class EntityRenderDispatcherMixin {
 		double camX,
 		double camY,
 		double camZ,
+		float partialTick,
 		CallbackInfoReturnable<Boolean> cir
 	) {
 		if (ImaginationWorldControls.INSTANCE.isEntitySuppressed(entity)) {

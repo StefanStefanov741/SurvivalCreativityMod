@@ -1,6 +1,5 @@
 package ortero.survivalcreativity.com.fabric.client;
 
-import org.lwjgl.glfw.GLFW;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
@@ -20,26 +19,26 @@ public final class ModKeybindsFabric {
 	public static void register() {
 		TOGGLE_EDIT = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 			"key.survivalcreativitymod.toggle_edit",
-			InputConstants.Type.KEYSYM,
-			GLFW.GLFW_KEY_I,
+			InputConstants.Type.KEYBOARD,
+			InputConstants.KEY_I,
 			CATEGORY
 		));
 		SAVE = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 			"key.survivalcreativitymod.save",
-			InputConstants.Type.KEYSYM,
-			GLFW.GLFW_KEY_K,
+			InputConstants.Type.KEYBOARD,
+			InputConstants.KEY_K,
 			CATEGORY
 		));
 		OPEN_MENU = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 			"key.survivalcreativitymod.open_menu",
-			InputConstants.Type.KEYSYM,
-			GLFW.GLFW_KEY_H,
+			InputConstants.Type.KEYBOARD,
+			InputConstants.KEY_H,
 			CATEGORY
 		));
 		HIDE_PREVIEW = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 			"key.survivalcreativitymod.hide_preview",
-			InputConstants.Type.KEYSYM,
-			GLFW.GLFW_KEY_U,
+			InputConstants.Type.KEYBOARD,
+			InputConstants.KEY_U,
 			CATEGORY
 		));
 	}

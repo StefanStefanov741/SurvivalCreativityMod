@@ -1,6 +1,6 @@
 # SurvivalCreativityMod
 
-Client-side Fabric mod for Minecraft **26.2**. Enter a local creative-like imagination, save your build, then preview it as a hologram in survival while you place the real blocks.
+Client-side Fabric / NeoForge mod for Minecraft **26.3**. Enter a local creative-like imagination, save your build, then preview it as a hologram in survival while you place the real blocks.
 
 ## Controls
 

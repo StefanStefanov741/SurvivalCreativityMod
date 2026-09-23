@@ -131,7 +131,14 @@ public final class ImaginationManager {
 		bodyXRot = absolute.xRot();
 
 		client.getConnection().send(
-			new net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket(packet.id()));
+			new net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket(
+				packet.id(),
+				bodyPosition.x,
+				bodyPosition.y,
+				bodyPosition.z,
+				bodyYRot,
+				bodyXRot
+			));
 
 		sendingIdleHeartbeat = true;
 		try {
